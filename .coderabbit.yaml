@@ -1,0 +1,42 @@
+# CodeRabbit configuration for podcaster
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+#
+# Setup: install the CodeRabbit GitHub App at https://github.com/apps/coderabbit-ai
+# and grant it access to this repository. No SDK or runtime code is needed —
+# CodeRabbit reviews PRs automatically via the GitHub App integration.
+
+language: "en-US"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - "feat/**"
+
+path_filters:
+  - "!node_modules/**"
+  - "!dist/**"
+  - "!.output/**"
+  - "!src/routeTree.gen.ts"
+
+path_instructions:
+  - path: "src/routes/**"
+    instructions: |
+      These are TanStack Router file-based routes. Check that:
+      - createFileRoute path matches the file location
+      - loaders use TanStack Query queryOptions where applicable
+      - auth-protected routes use the _authenticated layout convention
+  - path: "src/integrations/clerk/**"
+    instructions: |
+      Clerk integration files. Verify VITE_CLERK_PUBLISHABLE_KEY is read
+      from import.meta.env and never hardcoded.
+  - path: "biome.json"
+    instructions: |
+      Biome is the sole linter/formatter. Do not suggest ESLint or Prettier alternatives.
