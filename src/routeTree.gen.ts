@@ -9,19 +9,62 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as DiscoverRouteImport } from './routes/discover'
+import { Route as BookmarksRouteImport } from './routes/bookmarks'
+import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PodcastIdRouteImport } from './routes/podcast.$id'
+import { Route as EditIdRouteImport } from './routes/edit.$id'
 import { Route as DemoQueryRouteImport } from './routes/demo/query'
 import { Route as DemoClerkRouteImport } from './routes/demo/clerk'
+import { Route as AuthenticatedMyProfileRouteImport } from './routes/_authenticated/my-profile'
+import { Route as AuthenticatedCreatePodcastRouteImport } from './routes/_authenticated/create-podcast'
 
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiscoverRoute = DiscoverRouteImport.update({
+  id: '/discover',
+  path: '/discover',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BookmarksRoute = BookmarksRouteImport.update({
+  id: '/bookmarks',
+  path: '/bookmarks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BillingRoute = BillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PodcastIdRoute = PodcastIdRouteImport.update({
+  id: '/podcast/$id',
+  path: '/podcast/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EditIdRoute = EditIdRouteImport.update({
+  id: '/edit/$id',
+  path: '/edit/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DemoQueryRoute = DemoQueryRouteImport.update({
@@ -34,43 +77,152 @@ const DemoClerkRoute = DemoClerkRouteImport.update({
   path: '/demo/clerk',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedMyProfileRoute = AuthenticatedMyProfileRouteImport.update({
+  id: '/my-profile',
+  path: '/my-profile',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedCreatePodcastRoute =
+  AuthenticatedCreatePodcastRouteImport.update({
+    id: '/create-podcast',
+    path: '/create-podcast',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/billing': typeof BillingRoute
+  '/bookmarks': typeof BookmarksRoute
+  '/discover': typeof DiscoverRoute
+  '/sign-in': typeof SignInRoute
+  '/create-podcast': typeof AuthenticatedCreatePodcastRoute
+  '/my-profile': typeof AuthenticatedMyProfileRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
+  '/edit/$id': typeof EditIdRoute
+  '/podcast/$id': typeof PodcastIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/billing': typeof BillingRoute
+  '/bookmarks': typeof BookmarksRoute
+  '/discover': typeof DiscoverRoute
+  '/sign-in': typeof SignInRoute
+  '/create-podcast': typeof AuthenticatedCreatePodcastRoute
+  '/my-profile': typeof AuthenticatedMyProfileRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
+  '/edit/$id': typeof EditIdRoute
+  '/podcast/$id': typeof PodcastIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/about': typeof AboutRoute
+  '/billing': typeof BillingRoute
+  '/bookmarks': typeof BookmarksRoute
+  '/discover': typeof DiscoverRoute
+  '/sign-in': typeof SignInRoute
+  '/_authenticated/create-podcast': typeof AuthenticatedCreatePodcastRoute
+  '/_authenticated/my-profile': typeof AuthenticatedMyProfileRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
+  '/edit/$id': typeof EditIdRoute
+  '/podcast/$id': typeof PodcastIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/demo/clerk' | '/demo/query'
+  fullPaths:
+    | '/'
+    | '/about'
+    | '/billing'
+    | '/bookmarks'
+    | '/discover'
+    | '/sign-in'
+    | '/create-podcast'
+    | '/my-profile'
+    | '/demo/clerk'
+    | '/demo/query'
+    | '/edit/$id'
+    | '/podcast/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/demo/clerk' | '/demo/query'
-  id: '__root__' | '/' | '/about' | '/demo/clerk' | '/demo/query'
+  to:
+    | '/'
+    | '/about'
+    | '/billing'
+    | '/bookmarks'
+    | '/discover'
+    | '/sign-in'
+    | '/create-podcast'
+    | '/my-profile'
+    | '/demo/clerk'
+    | '/demo/query'
+    | '/edit/$id'
+    | '/podcast/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/about'
+    | '/billing'
+    | '/bookmarks'
+    | '/discover'
+    | '/sign-in'
+    | '/_authenticated/create-podcast'
+    | '/_authenticated/my-profile'
+    | '/demo/clerk'
+    | '/demo/query'
+    | '/edit/$id'
+    | '/podcast/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   AboutRoute: typeof AboutRoute
+  BillingRoute: typeof BillingRoute
+  BookmarksRoute: typeof BookmarksRoute
+  DiscoverRoute: typeof DiscoverRoute
+  SignInRoute: typeof SignInRoute
   DemoClerkRoute: typeof DemoClerkRoute
   DemoQueryRoute: typeof DemoQueryRoute
+  EditIdRoute: typeof EditIdRoute
+  PodcastIdRoute: typeof PodcastIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/discover': {
+      id: '/discover'
+      path: '/discover'
+      fullPath: '/discover'
+      preLoaderRoute: typeof DiscoverRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bookmarks': {
+      id: '/bookmarks'
+      path: '/bookmarks'
+      fullPath: '/bookmarks'
+      preLoaderRoute: typeof BookmarksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/billing': {
+      id: '/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof BillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about': {
       id: '/about'
       path: '/about'
@@ -78,11 +230,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/podcast/$id': {
+      id: '/podcast/$id'
+      path: '/podcast/$id'
+      fullPath: '/podcast/$id'
+      preLoaderRoute: typeof PodcastIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/edit/$id': {
+      id: '/edit/$id'
+      path: '/edit/$id'
+      fullPath: '/edit/$id'
+      preLoaderRoute: typeof EditIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/demo/query': {
@@ -99,15 +272,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DemoClerkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/my-profile': {
+      id: '/_authenticated/my-profile'
+      path: '/my-profile'
+      fullPath: '/my-profile'
+      preLoaderRoute: typeof AuthenticatedMyProfileRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/create-podcast': {
+      id: '/_authenticated/create-podcast'
+      path: '/create-podcast'
+      fullPath: '/create-podcast'
+      preLoaderRoute: typeof AuthenticatedCreatePodcastRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
+interface AuthenticatedRouteChildren {
+  AuthenticatedCreatePodcastRoute: typeof AuthenticatedCreatePodcastRoute
+  AuthenticatedMyProfileRoute: typeof AuthenticatedMyProfileRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedCreatePodcastRoute: AuthenticatedCreatePodcastRoute,
+  AuthenticatedMyProfileRoute: AuthenticatedMyProfileRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
   AboutRoute: AboutRoute,
+  BillingRoute: BillingRoute,
+  BookmarksRoute: BookmarksRoute,
+  DiscoverRoute: DiscoverRoute,
+  SignInRoute: SignInRoute,
   DemoClerkRoute: DemoClerkRoute,
   DemoQueryRoute: DemoQueryRoute,
+  EditIdRoute: EditIdRoute,
+  PodcastIdRoute: PodcastIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

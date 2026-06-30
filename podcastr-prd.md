@@ -11,7 +11,8 @@ implementation, and testing decisions)
 
 People who want to publish a podcast need recording equipment, a co-host, editing skills, and
 cover art — a high barrier just to get an idea heard. People who want to listen want a familiar,
-Spotify-style way to browse, search, and stream shows without friction.
+Spotify-style way
+to browse, search, and stream shows without friction.
 
 As a creator, I have an idea for an episode but no studio, no second voice, and no designer. As a
 listener, I want to discover and play shows the way I already do in a music app, and I don't want
@@ -291,3 +292,109 @@ of Scope); the player store is the one piece of frontend logic worth a unit test
   recommendations have enough varied volume to look real. Prepare semantic-search demo queries
   that show meaning-based matching beating keyword matching.
 - This PRD supersedes the OpenAI-stack and verbatim-script assumptions in `client-brief.md`.
+
+---
+
+## Billing & Subscriptions (Pro plan)
+
+> Added 2026-06-24. Not in the original brief (which scoped costs to ~zero). This is a
+> **portfolio showcase** of a subscription-billing integration, structured as a cost-control
+> gate on the genuinely-expensive operation (AI generation). Goal: a clean, demoable upgrade
+> lifecycle a reviewer can follow in under a minute — not real revenue infrastructure.
+
+### Product shape
+
+- **Two tiers: Free and Pro.** Pricing table is designed to scale to more tiers but only two
+  are built.
+- **Free** = up to **3 successful generations (lifetime)**, AI-generated thumbnail only, no badge.
+- **Pro** = unlimited generations, **custom thumbnail upload**, and a **"Pro" creator badge**.
+- The paywall gates **podcast generation** (the Gemini script → embedding → audio → thumbnail
+  pipeline), the one operation with real per-use cost.
+
+### Provider — Clerk Billing
+
+- Use **Clerk Billing** (native plans/features in the Clerk dashboard, Stripe as processor).
+  Reuses the existing Clerk identity stack; primitives are `<PricingTable />`, `has({ plan })`,
+  and `<Protect>`.
+- Plans/features are configured **in the Clerk dashboard** (prerequisite, not code): a `pro`
+  plan and a `custom_thumbnail` feature.
+
+### How the Convex backend learns the plan (the one real gotcha — settled)
+
+The generation gate runs inside a **Convex action**, which sees identity via
+`ctx.auth.getUserIdentity()`. **Clerk Billing's plan claims (`pla`/`fea`) are session-tied and
+cannot be emitted into a custom JWT template** — and Convex *requires* a custom template named
+`convex`. Verified against current Clerk + Convex docs (2026). Therefore the plan **cannot** ride
+directly into `getUserIdentity()`.
+
+**Decision: mirror the plan onto the Convex `users` doc via the existing Clerk webhook**
+(`convex/http.ts` already handles `user.created`/`updated`). Extend it to handle Clerk Billing
+subscription events and write `plan` onto the user doc. The gate then reads `plan` +
+`generationCount` from **one place** (the DB), fully inside Convex. Optionally layer client-side
+`has({ plan })` for instant UI reflection, but the **DB check is authoritative**.
+
+### Data model
+
+- **`users`**: add `plan: v.optional(v.union(v.literal('free'), v.literal('pro')))`
+  (absent ⇒ free) and `generationCount: v.optional(v.number())` (absent ⇒ 0).
+- **`podcasts`**: add `countedTowardQuota: v.optional(v.boolean())` — marks that this podcast has
+  already consumed a generation slot, so the counter is idempotent (see below).
+
+### Enforcement — backend-authoritative, frontend reflects
+
+- **Gate (check-at-start):** at the top of the public `generatePodcast` action, resolve the user
+  from `ctx.auth.getUserIdentity()` (**not** a client-supplied `authorId`), and if
+  `plan !== 'pro'` and `generationCount >= 3`, throw a typed error. The UI mirrors this (shows
+  "N of 3 used" and swaps the submit button for an Upgrade CTA at the limit) but never relies on
+  the frontend for the gate.
+- **Count (count-at-success, idempotent per podcast):** `runPipeline` reaches `ready` in exactly
+  one place and is shared by three callers — `generatePodcast` (fresh), `retryGeneration`
+  (retry), and `editAndRegenerate` (edit). At the `ready` step, increment the author's
+  `generationCount` **only if `countedTowardQuota` is not already set**, then set it. This single
+  rule yields the correct behavior for all three paths:
+  - fresh success → counts once
+  - failure → never reaches `ready` → costs nothing; a later **retry** that succeeds counts once
+  - **edit/regenerate** of an already-ready podcast → already counted → never double-charged
+- **Known accepted limitation:** because the gate reads `generationCount` (successful only) and
+  the increment lands on success, a user could *start* more than 3 generations concurrently before
+  any finishes. Acceptable for a single-user demo; not worth closing for a showcase.
+
+### Pro-only features
+
+- **Custom thumbnail upload:** gated by the `custom_thumbnail` Clerk feature. Free users get the
+  AI thumbnail path only; the upload mutation **also** enforces the plan server-side (read from the
+  `users` doc), not just the UI.
+- **"Pro" badge:** pure UI via `has({ plan: 'pro' })` on the profile and podcast cards. Disappears
+  automatically on downgrade.
+
+### Downgrade / cancel — "grandfather what's made, gate what's new"
+
+- Existing content is **never touched** (podcasts keep custom thumbnails forever).
+- The badge disappears immediately (live plan check).
+- The generation gate simply re-applies; a former Pro user is almost always already ≥3 successful
+  generations, so they can't make new free ones — the correct "you're out of free generations"
+  outcome. **No reset, no special-case code.**
+
+### Upgrade surfaces
+
+- A canonical **`/billing` route** (in the sidebar) rendering Clerk's `<PricingTable />`, also
+  hosting the manage-subscription / cancel link.
+- An **inline wall on Create**: at the limit, the submit control becomes an "Upgrade to Pro" CTA
+  with "You've used all 3 free generations," deep-linking to `/billing`. Clerk's hosted checkout
+  handles the payment overlay.
+
+### Testing (extends Seam 1 — `convex-test`)
+
+Because the plan is mirrored onto the `users` doc, tests need **no Clerk/Stripe mocking** — set
+`plan` and `generationCount` on the seeded user and assert backend behavior:
+
+- Free user at `generationCount = 3` is rejected by `generatePodcast`; under 3 succeeds.
+- `generationCount` increments **only** when a podcast first reaches `ready`.
+- A failed generation does **not** increment.
+- A retry of a previously-failed podcast counts **once**; an edit/regenerate of an already-ready
+  podcast does **not** increment.
+- A Pro user is never gated.
+- The custom-thumbnail upload mutation rejects a Free user.
+
+UI surfaces (pricing table, wall, badge) are verified manually/in demo, consistent with the
+existing Out of Scope stance on component/route tests.

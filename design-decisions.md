@@ -3,9 +3,7 @@
 **Status:** Resolved via grilling session, 2026-06-19
 **Supersedes:** conflicting guidance in `client-brief.md` and `AGENTS.md` where noted below.
 
-This document is the source of truth for architecture and scope decisions. The original
-`client-brief.md` assumed an OpenAI stack and a verbatim-script create flow; both have been
-superseded (see AI stack and Create flow below).
+This document is the source of truth for architecture and scope decisions. 
 
 ---
 

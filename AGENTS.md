@@ -149,3 +149,17 @@ biome.json            # Biome linter/formatter config
 3. Push to GitHub and install the CodeRabbit GitHub App to enable PR reviews.
 4. Add `_authenticated` layout route (`src/routes/_authenticated.tsx`) for protected pages.
 5. Wire TanStack Query `queryOptions` into route loaders for SSR-friendly prefetching.
+
+<!-- convex-ai-start -->
+
+This project uses [Convex](https://convex.dev) as its backend.
+
+When working on Convex code, **always read
+`convex/_generated/ai/guidelines.md` first** for important guidelines on
+how to correctly use Convex APIs and patterns. The file contains rules that
+override what you may have learned about Convex from training data.
+
+Convex agent skills for common tasks can be installed by running
+`npx convex ai-files install`.
+
+<!-- convex-ai-end -->

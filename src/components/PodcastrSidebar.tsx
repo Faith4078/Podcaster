@@ -1,0 +1,143 @@
+import { Show, UserButton, useUser } from '@clerk/tanstack-react-start'
+import { Link } from '@tanstack/react-router'
+import { useMutation } from 'convex/react'
+import { Bookmark, Compass, CreditCard, Home, Mic, User, X } from 'lucide-react'
+import { useEffect } from 'react'
+import { api } from '../../convex/_generated/api'
+
+const navItems = [
+  { to: '/' as const, icon: Home, label: 'Home', exact: true },
+  { to: '/discover' as const, icon: Compass, label: 'Discover' },
+  { to: '/bookmarks' as const, icon: Bookmark, label: 'Bookmarks' },
+  { to: '/create-podcast' as const, icon: Mic, label: 'Create Podcast' },
+  { to: '/my-profile' as const, icon: User, label: 'My Profile' },
+  { to: '/billing' as const, icon: CreditCard, label: 'Billing' },
+]
+
+export default function PodcastrSidebar({
+  open = false,
+  onClose,
+}: {
+  /** Mobile drawer open state (ignored on md+, where the sidebar is always shown). */
+  open?: boolean
+  onClose?: () => void
+}) {
+  const { user } = useUser()
+  const ensureCurrentUser = useMutation(api.users.ensureCurrentUser)
+
+  // Local-dev fallback: upsert current Clerk user into Convex on first load
+  useEffect(() => {
+    if (!user) return
+    ensureCurrentUser({
+      clerkId: user.id,
+      name: user.fullName ?? user.username ?? 'User',
+      email: user.primaryEmailAddress?.emailAddress ?? '',
+      imageUrl: user.imageUrl ?? undefined,
+    }).catch(console.error)
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <>
+      {/* Mobile drawer backdrop — tap to dismiss. Hidden on md+. */}
+      {open ? (
+        <div
+          className="fixed inset-0 z-[55] bg-black/60 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      ) : null}
+
+      {/* Off-canvas drawer on mobile (slides in via the hamburger); a static
+          in-flow column on md+ where it's always visible. */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-[60] flex h-full w-[270px] shrink-0 flex-col bg-[#15171C] transition-transform duration-300 ease-out md:static md:z-auto md:translate-x-0 ${
+          open ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Logo (+ mobile close button) */}
+        <div className="flex items-center gap-3 px-7 py-8">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 3.5L21 12L4 20.5V3.5Z" fill="#f97535" />
+          </svg>
+          <span className="text-xl font-bold tracking-tight text-white">Podcastr</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close menu"
+            title="Close menu"
+            className="ml-auto text-[#71788B] transition-colors hover:text-white md:hidden"
+          >
+            <X size={22} />
+          </button>
+        </div>
+
+        {/* Nav */}
+        <nav className="mt-1 flex flex-col gap-0.5 pl-4 pr-0">
+          {navItems.map(({ to, icon: Icon, label, exact }) => (
+            <Link
+              key={to}
+              to={to}
+              onClick={onClose}
+              activeOptions={exact ? { exact: true } : undefined}
+              className="relative flex items-center gap-4 rounded-xl px-4 py-3 text-base font-bold text-[#71788B] transition-colors hover:bg-white/6 hover:text-white"
+              activeProps={{
+                className:
+                  "relative flex items-center gap-4 rounded-xl px-4 py-3 text-base font-bold text-white bg-white/6 after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-7 after:w-[3px] after:rounded-l-full after:bg-[#f97535]",
+              }}
+            >
+              <Icon size={18} />
+              {label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="flex-1" />
+
+        {/* Account — Clerk UserButton when signed in; a sign-up CTA when not. */}
+        <div className="border-t border-white/6 px-6 py-5">
+          <Show when="signed-in">
+            <UserButton
+              showName
+              appearance={{
+                variables: {
+                  colorForeground: '#ffffff',
+                  colorBackground: '#15171C',
+                  colorMutedForeground: '#71788B',
+                },
+                elements: {
+                  userButtonOuterIdentifier: 'text-white font-semibold',
+                  userButtonPopoverCard: 'bg-[#15171C] border border-[#252525]',
+                  userButtonPopoverMain: 'bg-[#15171C]',
+                  userButtonPopoverActions: 'bg-[#15171C]',
+                  userButtonPopoverActionButton: 'text-white hover:bg-white/5',
+                  userButtonPopoverActionButtonIcon: 'text-[#71788B]',
+                  userButtonPopoverActionButtonIconBox: 'text-[#71788B]',
+                  userButtonPopoverFooter: 'bg-[#15171C]',
+                },
+              }}
+            />
+          </Show>
+          <Show when="signed-out">
+            <Link
+              to="/sign-in"
+              onClick={onClose}
+              className="flex w-full items-center justify-center rounded-md bg-[#f97535] px-4 py-3 text-sm font-bold text-white transition-opacity hover:opacity-90"
+            >
+              Sign up
+            </Link>
+            <p className="mt-3 text-center text-xs text-[#71788B]">
+              Already have an account?{' '}
+              <Link
+                to="/sign-in"
+                onClick={onClose}
+                className="font-semibold text-[#f97535] hover:underline"
+              >
+                Sign in
+              </Link>
+            </p>
+          </Show>
+        </div>
+      </aside>
+    </>
+  )
+}

@@ -1,4 +1,4 @@
-# Project Brief: Podcaster
+# Project Brief: Podcastr
 
 **Prepared for:** Faith
 **Type:** Portfolio Project
@@ -38,7 +38,7 @@ This is being built as a portfolio piece, so the priority is a polished, working
 - Home dashboard: Trending, Latest, Popular podcast feeds
 - Discover page: search with filters and empty states
 - Podcast detail page: playback, description, transcript, similar podcasts
-- Create Podcast flow: AI audio generation, AI or custom thumbnail, category and description
+- Create Podcast flow: multi-speaker AI audio generation with per-speaker voice selection, AI or custom thumbnail, category and description
 - Podcaster profile: listener count, podcast grid, empty state
 - Persistent global audio player
 - Sidebar: "Fans Also Like" carousel, Top Podcasters leaderboard
@@ -61,22 +61,26 @@ This is an ambitious feature set for a portfolio timeline (9 screens, full CRUD,
 ## 5. Primary User Flows
 
 1. **Discover & Play** — sign in → browse Home dashboard → open a podcast → play via persistent player → search Discover for more
-2. **Create & Publish** — go to Create Podcast → enter title, category, description, script → generate audio + thumbnail → publish → appears on profile
+2. **Create & Publish** — go to Create Podcast → enter title, category, description → write a speaker-labelled script and pick a voice per speaker → generate multi-speaker audio + thumbnail → publish → appears on profile
 3. **Manage** — open own podcast → Edit (pre-filled form, re-generates assets) or Delete
-4. **Manage** - You are provided with the figma file for this project:
 
 ---
 
-## 6. Critical Decision: How Audio Is Generated
+## 6. Centerpiece Feature: Multi-Speaker Audio Generation
 
-This is the centerpiece feature and the least forgiving part of the build, so the approach must be chosen deliberately up front.
+This is the standout feature and the least forgiving part of the build, so the approach is fixed up front.
 
-- **OpenAI TTS (tts-1 / tts-1-hd) is capped at 4,096 characters per request** — roughly 3–5 minutes of speech. Longer scripts must be split into chunks and the audio stitched together.
-- **TTS produces single-voice narration**, not a multi-speaker conversation. The original Figma detail page shows a multi-speaker dialogue transcript; single-voice TTS will not match that.
+**Approach: multi-speaker AI narration via Gemini TTS, with user-selected voices.** On the Create page the user sets the number of speakers (1–2 for MVP), writes a script with each line labelled by speaker, and picks a prebuilt Gemini voice for each speaker (with a sample-play preview). Gemini TTS returns a single audio file with distinct, consistent voices per speaker — no chaining separate calls or manually stitching audio. This matches the conversational transcript shown in the original Figma design.
 
-**Recommended stance for the portfolio version:** ship **AI-narrated, single-voice episodes**. It's honest about what the tool does, far simpler to build, and still demonstrates the full generation pipeline. If a conversational feel is wanted later, assign different voices per speaker line and stitch the segments — treat that as post-MVP.
+Constraints to engineer around:
 
-All AI calls (TTS, thumbnail, transcription, embeddings) run inside TanStack Start **server functions** (`createServerFn`), so API keys never reach the browser.
+- **Preview status** — Gemini TTS is in Preview; expect occasional changes.
+- **Length** — quality can drift past a few minutes; input cap is ~8,000 bytes, output ~655 s. Long episodes are chunked server-side and concatenated, preserving per-speaker voices.
+- **Intermittent 500s** — the model occasionally returns text instead of audio; the generation server function needs automated retry with backoff.
+- **API surface** — use the Gemini API (API key) over the Vertex AI path, which adds GCP project/auth setup.
+- **MVP limit** — prebuilt voices only; custom voice cloning is post-MVP.
+
+All AI calls (Gemini TTS, thumbnail, transcription, embeddings) run inside TanStack Start **server functions** (`createServerFn`), so API keys never reach the browser.
 
 ---
 
@@ -101,7 +105,7 @@ This split keeps the common path cheap and accurate, and only uses transcription
 | Database          | Convex                                                              | Real-time feeds and listener counts with no extra work; built-in vector search and file storage; first-class TanStack Start support |
 | Server-side logic | TanStack Start server functions (`createServerFn`)                  | Type-safe RPC; replaces Next.js Route Handlers for all AI/API calls                                                                 |
 | File storage      | Convex file storage (evaluate first) or Cloudflare R2               | See storage note below                                                                                                              |
-| AI Audio          | OpenAI TTS                                                          | Pay-per-use, cheap at this scale; chunk scripts over 4,096 chars                                                                    |
+| AI Audio          | Gemini TTS                                                          | Native multi-speaker in one call, user-selectable prebuilt voices; chunk long scripts, retry on 500s; in Preview                    |
 | Transcription     | OpenAI Whisper                                                      | Only for user-uploaded audio, not AI-generated episodes                                                                             |
 | AI Thumbnail      | OpenAI DALL-E 3                                                     | Generates cover art from text prompt; outputs 1024×1024 — standardize on this size                                                  |
 | Search            | Title/description match (MVP) / Convex vector search (stretch goal) | Semantic search over title + description + transcript                                                                               |
@@ -128,9 +132,9 @@ Be aware that with a small seeded catalog (~10 podcasts), semantic search looks 
 
 ## 11. Open Decisions
 
-- Confirm audio approach: single-voice AI narration (recommended) vs multi-speaker stitching
 - Confirm storage: Convex file storage (evaluate first) vs R2 + Worker
 - Confirm whether vector search is in MVP or a stretch goal
+- Confirm max speaker count for MVP (recommended: 2)
 
 ## 11a. Setup Note
 
