@@ -31,6 +31,7 @@
     "@tanstack/router-plugin": "^1.132.0",
     "convex": "^1.13.0",
     "lucide-react": "^0.545.0",
+    "nitro": "^3.0.260610-beta",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "sonner": "^2.0.7",
@@ -54,7 +55,7 @@
     "convex-test": "^0.0.53",
     "jsdom": "^28.1.0",
     "typescript": "^6.0.2",
-    "vite": "^8.0.0",
+    "vite": "^8.1.2",
     "vitest": "^4.1.5"
   },
   "pnpm": {
