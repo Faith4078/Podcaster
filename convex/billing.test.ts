@@ -174,10 +174,11 @@ describe('generatePodcast gate', () => {
     expect(podcast?.status).toBe('ready')
   })
 
-  test('Pro user past the free limit is never gated', async () => {
+  test('Pro user under the Pro limit (past the free limit) is allowed', async () => {
     const t = convexTest(schema, modules)
     stubFetch()
-    const authorId = await seedUser(t, { plan: 'pro', generationCount: 99 })
+    // 6 is past the free limit (3) but under the Pro limit (7).
+    const authorId = await seedUser(t, { plan: 'pro', generationCount: 6 })
     const podcastId = await seedPodcast(t, authorId)
 
     const asUser = t.withIdentity({ subject: 'user_1' })
@@ -187,6 +188,17 @@ describe('generatePodcast gate', () => {
 
     const podcast = await t.run((ctx) => ctx.db.get(podcastId))
     expect(podcast?.status).toBe('ready')
+  })
+
+  test('Pro user at the Pro limit (7) is rejected with QUOTA_EXCEEDED', async () => {
+    const t = convexTest(schema, modules)
+    const authorId = await seedUser(t, { plan: 'pro', generationCount: 7 })
+    const podcastId = await seedPodcast(t, authorId)
+
+    const asUser = t.withIdentity({ subject: 'user_1' })
+    await expect(
+      asUser.action(api.podcasts.generatePodcast, { podcastId }),
+    ).rejects.toSatisfy((err: unknown) => errorCode(err) === 'QUOTA_EXCEEDED')
   })
 
   test('unauthenticated caller is rejected', async () => {

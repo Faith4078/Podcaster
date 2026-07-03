@@ -9,13 +9,14 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as DiscoverRouteImport } from './routes/discover'
 import { Route as BookmarksRouteImport } from './routes/bookmarks'
 import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SignInIndexRouteImport } from './routes/sign-in/index'
+import { Route as SignInSsoCallbackRouteImport } from './routes/sign-in/sso-callback'
 import { Route as PodcastIdRouteImport } from './routes/podcast.$id'
 import { Route as EditIdRouteImport } from './routes/edit.$id'
 import { Route as DemoQueryRouteImport } from './routes/demo/query'
@@ -23,11 +24,6 @@ import { Route as DemoClerkRouteImport } from './routes/demo/clerk'
 import { Route as AuthenticatedMyProfileRouteImport } from './routes/_authenticated/my-profile'
 import { Route as AuthenticatedCreatePodcastRouteImport } from './routes/_authenticated/create-podcast'
 
-const SignInRoute = SignInRouteImport.update({
-  id: '/sign-in',
-  path: '/sign-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DiscoverRoute = DiscoverRouteImport.update({
   id: '/discover',
   path: '/discover',
@@ -55,6 +51,16 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInIndexRoute = SignInIndexRouteImport.update({
+  id: '/sign-in/',
+  path: '/sign-in/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInSsoCallbackRoute = SignInSsoCallbackRouteImport.update({
+  id: '/sign-in/sso-callback',
+  path: '/sign-in/sso-callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PodcastIdRoute = PodcastIdRouteImport.update({
@@ -95,13 +101,14 @@ export interface FileRoutesByFullPath {
   '/billing': typeof BillingRoute
   '/bookmarks': typeof BookmarksRoute
   '/discover': typeof DiscoverRoute
-  '/sign-in': typeof SignInRoute
   '/create-podcast': typeof AuthenticatedCreatePodcastRoute
   '/my-profile': typeof AuthenticatedMyProfileRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
+  '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
+  '/sign-in/': typeof SignInIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -109,13 +116,14 @@ export interface FileRoutesByTo {
   '/billing': typeof BillingRoute
   '/bookmarks': typeof BookmarksRoute
   '/discover': typeof DiscoverRoute
-  '/sign-in': typeof SignInRoute
   '/create-podcast': typeof AuthenticatedCreatePodcastRoute
   '/my-profile': typeof AuthenticatedMyProfileRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
+  '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
+  '/sign-in': typeof SignInIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -125,13 +133,14 @@ export interface FileRoutesById {
   '/billing': typeof BillingRoute
   '/bookmarks': typeof BookmarksRoute
   '/discover': typeof DiscoverRoute
-  '/sign-in': typeof SignInRoute
   '/_authenticated/create-podcast': typeof AuthenticatedCreatePodcastRoute
   '/_authenticated/my-profile': typeof AuthenticatedMyProfileRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
+  '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
+  '/sign-in/': typeof SignInIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,13 +150,14 @@ export interface FileRouteTypes {
     | '/billing'
     | '/bookmarks'
     | '/discover'
-    | '/sign-in'
     | '/create-podcast'
     | '/my-profile'
     | '/demo/clerk'
     | '/demo/query'
     | '/edit/$id'
     | '/podcast/$id'
+    | '/sign-in/sso-callback'
+    | '/sign-in/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -155,13 +165,14 @@ export interface FileRouteTypes {
     | '/billing'
     | '/bookmarks'
     | '/discover'
-    | '/sign-in'
     | '/create-podcast'
     | '/my-profile'
     | '/demo/clerk'
     | '/demo/query'
     | '/edit/$id'
     | '/podcast/$id'
+    | '/sign-in/sso-callback'
+    | '/sign-in'
   id:
     | '__root__'
     | '/'
@@ -170,13 +181,14 @@ export interface FileRouteTypes {
     | '/billing'
     | '/bookmarks'
     | '/discover'
-    | '/sign-in'
     | '/_authenticated/create-podcast'
     | '/_authenticated/my-profile'
     | '/demo/clerk'
     | '/demo/query'
     | '/edit/$id'
     | '/podcast/$id'
+    | '/sign-in/sso-callback'
+    | '/sign-in/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -186,22 +198,16 @@ export interface RootRouteChildren {
   BillingRoute: typeof BillingRoute
   BookmarksRoute: typeof BookmarksRoute
   DiscoverRoute: typeof DiscoverRoute
-  SignInRoute: typeof SignInRoute
   DemoClerkRoute: typeof DemoClerkRoute
   DemoQueryRoute: typeof DemoQueryRoute
   EditIdRoute: typeof EditIdRoute
   PodcastIdRoute: typeof PodcastIdRoute
+  SignInSsoCallbackRoute: typeof SignInSsoCallbackRoute
+  SignInIndexRoute: typeof SignInIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/sign-in': {
-      id: '/sign-in'
-      path: '/sign-in'
-      fullPath: '/sign-in'
-      preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/discover': {
       id: '/discover'
       path: '/discover'
@@ -242,6 +248,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in/': {
+      id: '/sign-in/'
+      path: '/sign-in'
+      fullPath: '/sign-in/'
+      preLoaderRoute: typeof SignInIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in/sso-callback': {
+      id: '/sign-in/sso-callback'
+      path: '/sign-in/sso-callback'
+      fullPath: '/sign-in/sso-callback'
+      preLoaderRoute: typeof SignInSsoCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/podcast/$id': {
@@ -310,11 +330,12 @@ const rootRouteChildren: RootRouteChildren = {
   BillingRoute: BillingRoute,
   BookmarksRoute: BookmarksRoute,
   DiscoverRoute: DiscoverRoute,
-  SignInRoute: SignInRoute,
   DemoClerkRoute: DemoClerkRoute,
   DemoQueryRoute: DemoQueryRoute,
   EditIdRoute: EditIdRoute,
   PodcastIdRoute: PodcastIdRoute,
+  SignInSsoCallbackRoute: SignInSsoCallbackRoute,
+  SignInIndexRoute: SignInIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,10 +1,10 @@
-import { SignUp } from '@clerk/tanstack-react-start'
-import { createFileRoute } from '@tanstack/react-router'
-import AuthPageLayout from '../components/AuthPageLayout'
+import { SignIn } from '@clerk/tanstack-react-start';
+import { createFileRoute } from '@tanstack/react-router';
+import AuthPageLayout from '../../components/AuthPageLayout';
 
-export const Route = createFileRoute('/sign-in')({
-  component: SignUpPage,
-})
+export const Route = createFileRoute('/sign-in/')({
+  component: SignInPage,
+});
 
 const clerkAppearance = {
   variables: {
@@ -24,7 +24,7 @@ const clerkAppearance = {
     colorInputForeground: '#ffffff',
 
     // Misc
-    colorNeutral: '#8892b0',
+    colorNeutral: '#8892❯b0',
     colorDanger: '#f87171',
     colorSuccess: '#4ade80',
     colorWarning: '#fbbf24',
@@ -34,12 +34,12 @@ const clerkAppearance = {
     fontFamily: 'inherit',
     fontSize: '14px',
   },
-} as const
+} as const;
 
-function SignUpPage() {
+function SignInPage() {
   return (
     <AuthPageLayout>
-      <SignUp appearance={clerkAppearance} />
+      <SignIn appearance={clerkAppearance} />
     </AuthPageLayout>
-  )
+  );
 }

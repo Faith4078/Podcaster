@@ -11,9 +11,10 @@ export const Route = createFileRoute('/_authenticated/create-podcast')({
   component: CreatePodcastPage,
 })
 
-// Mirrors the server's FREE_GENERATION_LIMIT (convex/podcasts.ts). The backend
-// gate is authoritative; this is for the inline wall + remaining-count copy.
+// Mirrors the server's FREE_GENERATION_LIMIT / PRO_GENERATION_LIMIT (convex/podcasts.ts).
+// The backend gate is authoritative; this is for the inline wall + remaining-count copy.
 const FREE_GENERATION_LIMIT = 3
+const PRO_GENERATION_LIMIT = 7
 
 const AI_VOICES = [
   { id: 'alloy', name: 'Alloy' },
@@ -101,8 +102,9 @@ function CreatePodcastPage() {
   const isPro = convexUser?.plan === 'pro' || has?.({ plan: 'pro' }) === true
   const canUploadThumbnail = isPro || has?.({ feature: 'custom_thumbnail' }) === true
   const generationCount = convexUser?.generationCount ?? 0
-  const remainingFree = Math.max(0, FREE_GENERATION_LIMIT - generationCount)
-  const atFreeLimit = !isPro && remainingFree === 0
+  const generationLimit = isPro ? PRO_GENERATION_LIMIT : FREE_GENERATION_LIMIT
+  const remainingGenerations = Math.max(0, generationLimit - generationCount)
+  const atGenerationLimit = remainingGenerations === 0
 
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
@@ -164,7 +166,7 @@ function CreatePodcastPage() {
     }
   }
 
-  const showWall = atFreeLimit || quotaHit
+  const showWall = atGenerationLimit || quotaHit
   const canPublish =
     !submitting && !!convexUser && title.trim() && speaker1 && script.trim() && category
 
@@ -333,15 +335,19 @@ function CreatePodcastPage() {
           )}
         </div>
 
-        {/* Free quota meter — Pro users see neither this nor the wall. */}
-        {!isPro && !showWall && convexUser && (
+        {/* Quota meter — Free shows a link to upgrade; Pro shows remaining of 7. */}
+        {!showWall && convexUser && (
           <p className="text-sm text-[#71788B]">
             <span className="font-bold text-white">{generationCount}</span> of{' '}
-            {FREE_GENERATION_LIMIT} free podcasts used.{' '}
-            <Link to="/billing" className="font-semibold text-[#f97535] hover:underline">
-              Upgrade to Pro
-            </Link>{' '}
-            for unlimited generations.
+            {generationLimit} {isPro ? 'Pro' : 'free'} podcasts used.{' '}
+            {!isPro && (
+              <>
+                <Link to="/billing" className="font-semibold text-[#f97535] hover:underline">
+                  Upgrade to Pro
+                </Link>{' '}
+                for 7 podcast generations.
+              </>
+            )}
           </p>
         )}
 
@@ -352,19 +358,22 @@ function CreatePodcastPage() {
               <Crown size={20} className="mt-0.5 shrink-0 text-[#f97535]" />
               <div className="flex-1">
                 <p className="text-base font-bold text-white mb-1">
-                  You've used all {FREE_GENERATION_LIMIT} free generations.
+                  You've used all {generationLimit} {isPro ? 'Pro' : 'free'} generations.
                 </p>
                 <p className="text-sm text-[#71788B] mb-4">
-                  Upgrade to Pro for unlimited podcast generations, custom thumbnail uploads, and
-                  the Pro creator badge.
+                  {isPro
+                    ? "You've reached your Pro plan's generation limit for this period."
+                    : 'Upgrade to Pro for 7 podcast generations, custom thumbnail uploads, and the Pro creator badge.'}
                 </p>
-                <Link
-                  to="/billing"
-                  className="inline-flex items-center gap-2 rounded-md bg-[#f97535] px-[22px] py-[14px] text-base font-bold text-white transition-opacity hover:opacity-90"
-                >
-                  <Crown size={16} />
-                  Upgrade to Pro
-                </Link>
+                {!isPro && (
+                  <Link
+                    to="/billing"
+                    className="inline-flex items-center gap-2 rounded-md bg-[#f97535] px-[22px] py-[14px] text-base font-bold text-white transition-opacity hover:opacity-90"
+                  >
+                    <Crown size={16} />
+                    Upgrade to Pro
+                  </Link>
+                )}
               </div>
             </div>
           </div>

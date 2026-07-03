@@ -11,7 +11,13 @@ const config = defineConfig({
     devtools(),
     tailwindcss(),
     tanstackStart(),
-    nitro({ preset: 'vercel' }),
+    // preset 'vercel' → build emits the Vercel Build Output at .vercel/output.
+    // devServer.runner 'self' runs the nitro SSR environment in-process instead
+    // of the vercel/node-worker child process. The child-process runners talk to
+    // Vite over a named-pipe socket that dies on restart on Windows, producing
+    // `Vite environment "nitro" is unavailable` (503). The in-process runner has
+    // no socket, so dev is stable across restarts. Build is unaffected.
+    nitro({ preset: 'vercel', devServer: { runner: 'self' } }),
     viteReact(),
   ],
   ssr: {

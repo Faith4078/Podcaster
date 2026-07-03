@@ -24,7 +24,7 @@ function BillingPage() {
           )}
         </div>
         <p className="text-[#71788B] text-sm">
-          Free includes 3 podcast generations. Upgrade to Pro for unlimited generations, custom
+          Free includes 3 podcast generations. Upgrade to Pro for 7 podcast generations, custom
           thumbnail uploads, and the Pro creator badge.
         </p>
       </div>

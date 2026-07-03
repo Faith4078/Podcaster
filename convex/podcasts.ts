@@ -16,6 +16,10 @@ import type { ActionCtx, QueryCtx } from './_generated/server'
 // gate (generatePodcast) and the wall UI both key off this number.
 export const FREE_GENERATION_LIMIT = 3
 
+// Pro users may keep up to this many lifetime *successful* generations. The
+// gate (generatePodcast) keys off this number.
+export const PRO_GENERATION_LIMIT = 7
+
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 // A podcast with media URLs resolved and its author joined — the shape returned
@@ -145,14 +149,45 @@ const STOP_WORDS = new Set([
 ])
 
 // Drop stop words from a query, returning the cleaned string. If the query is
-// nothing BUT stop words (e.g. "is it the"), fall back to the original trimmed
-// text so the search still has something to match on rather than going blank.
+// nothing BUT stop words (e.g. "is it the"), there is no meaningful token
+// left to search on — return '' so the caller treats it as a no-match rather
+// than falling back to the raw stop words, which would match almost any
+// title on trivial substring overlap ("is" inside "Is it for weight loss").
 function stripStopWords(query: string): string {
   const trimmed = query.trim()
   const kept = trimmed
     .split(/\s+/)
     .filter((w) => w.length > 0 && !STOP_WORDS.has(w.toLowerCase()))
-  return kept.length > 0 ? kept.join(' ') : trimmed
+  return kept.join(' ')
+}
+
+// Convex's search index is fuzzy/typo-tolerant and returns its best 8 matches
+// even when none of them are genuinely relevant — so a "saas development"
+// query can still surface a plane-crash episode purely on loose token overlap.
+// This enforces literal keyword semantics on top of the fuzzy index: a result
+// only counts as a "keyword match" if its title actually contains one of the
+// cleaned query tokens (substring, case-insensitive — so "develop" still
+// matches "developer").
+function titleContainsAnyToken(title: string, tokens: string[]): boolean {
+  const lower = title.toLowerCase()
+  return tokens.some((t) => t.length > 0 && lower.includes(t.toLowerCase()))
+}
+
+// A single fixed cosine-similarity cutoff is fragile: what counts as "clearly
+// relevant" shifts with how the query is phrased, so a flat 0.6 either lets
+// off-topic near-misses through (e.g. a SaaS episode sneaking into a "health
+// related podcasts" search) or clips real matches on a differently-worded
+// query. Instead we anchor to the TOP score for this query and only keep
+// matches within a margin of it — same topic as the best hit — with an
+// absolute floor so a query with no good matches doesn't return the "least
+// bad" ones. Both knobs stay env-configurable for tuning against real data.
+function filterRelevantMatches<T extends { _score: number }>(matches: T[]): T[] {
+  if (matches.length === 0) return matches
+  const floor = Number(process.env.GEMINI_SEARCH_MIN_SCORE ?? 0.6)
+  const margin = Number(process.env.GEMINI_SEARCH_SCORE_MARGIN ?? 0.15)
+  const topScore = Math.max(...matches.map((m) => m._score))
+  const cutoff = Math.max(floor, topScore - margin)
+  return matches.filter((m) => m._score >= cutoff)
 }
 
 // Public: literal KEYWORD search over podcast titles via the full-text
@@ -165,6 +200,7 @@ export const searchPodcasts = query({
   handler: async (ctx, { query, category }) => {
     const cleaned = stripStopWords(query)
     if (!cleaned) return []
+    const tokens = cleaned.split(/\s+/).filter(Boolean)
 
     const matches = await ctx.db
       .query('podcasts')
@@ -179,7 +215,12 @@ export const searchPodcasts = query({
       // so a small cap here avoids low-relevance literal matches diluting the list.
       .take(8)
 
-    const ready = matches.filter((p) => p.status === 'ready')
+    // Fuzzy index match isn't the same as a real keyword match — require the
+    // title to actually contain one of the query's tokens (see
+    // titleContainsAnyToken above) so off-topic fuzzy hits don't ride along.
+    const ready = matches.filter(
+      (p) => p.status === 'ready' && titleContainsAnyToken(p.title, tokens),
+    )
     return Promise.all(ready.map((p) => withAuthorAndMedia(ctx, p)))
   },
 })
@@ -802,7 +843,8 @@ Write the script now:`
 })
 
 // Public: called from the client after podcast creation.
-// Gates Free users at FREE_GENERATION_LIMIT lifetime successful generations.
+// Gates users at their plan's lifetime successful-generation limit:
+// FREE_GENERATION_LIMIT for Free, PRO_GENERATION_LIMIT for Pro.
 export const generatePodcast = action({
   args: { podcastId: v.id('podcasts') },
   handler: async (ctx, { podcastId }) => {
@@ -820,7 +862,8 @@ export const generatePodcast = action({
     }
 
     const isPro = user.plan === 'pro'
-    if (!isPro && (user.generationCount ?? 0) >= FREE_GENERATION_LIMIT) {
+    const generationLimit = isPro ? PRO_GENERATION_LIMIT : FREE_GENERATION_LIMIT
+    if ((user.generationCount ?? 0) >= generationLimit) {
       throw new ConvexError({ code: 'QUOTA_EXCEEDED' })
     }
 
@@ -919,7 +962,19 @@ export const semanticSearch = action({
     if (!apiKey) throw new Error('GEMINI_API_KEY is not set in Convex environment variables.')
     const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001'
 
-    const vector = await embedTextForSearch(apiKey, trimmed, embeddingModel, 'RETRIEVAL_QUERY')
+    // Filler like "podcasts"/"related"/"about" dilutes the embedding toward
+    // generic "this is a podcast" phrasing shared by every episode, shrinking
+    // the gap between a true topical match and an unrelated one (measured on
+    // real data: "health related podcasts" scored the actual health episode
+    // 0.633 and an unrelated SaaS episode 0.600 — too close for any cutoff to
+    // separate). Stripping stop words sharpens the query onto the topic
+    // word(s), the same cleanup the keyword half already does. If nothing but
+    // filler remains ("is the"), there's no topic to embed — return no
+    // matches rather than embedding the raw filler, which scores close to
+    // every podcast and lets everything back in.
+    const semanticQuery = stripStopWords(trimmed)
+    if (!semanticQuery) return []
+    const vector = await embedTextForSearch(apiKey, semanticQuery, embeddingModel, 'RETRIEVAL_QUERY')
 
     const matches = await ctx.vectorSearch('podcasts', 'by_embedding', {
       vector,
@@ -928,13 +983,11 @@ export const semanticSearch = action({
     })
 
     // vectorSearch returns the k-nearest neighbors RANKED, never filtered — so
-    // an off-topic podcast still comes back, just with a low `_score`. Apply a
-    // relevance cutoff so "is saas still worth in 2027" doesn't surface an
-    // Ozempic episode. Measured on real data: true matches score ~0.71–0.74,
-    // off-topic ones ~0.41–0.50, so 0.6 sits in the empty gap between them.
-    // Tune via GEMINI_SEARCH_MIN_SCORE (cosine similarity, ~0–1).
-    const minScore = Number(process.env.GEMINI_SEARCH_MIN_SCORE ?? 0.6)
-    const relevant = matches.filter((m) => m._score >= minScore)
+    // an off-topic podcast still comes back, just with a lower `_score`. Apply
+    // an adaptive relevance cutoff (see filterRelevantMatches) so "is saas
+    // still worth in 2027" doesn't surface an Ozempic episode just because it
+    // cleared a flat floor.
+    const relevant = filterRelevantMatches(matches)
 
     return ctx.runQuery(internal.podcasts.getReadyByIds, {
       ids: relevant.map((m) => m._id),
@@ -944,9 +997,10 @@ export const semanticSearch = action({
 
 // Public: HYBRID search — combine a literal KEYWORD search (full-text over
 // titles) with the SEMANTIC vector search, so the box matches both literal
-// title words AND meaning. Exact/keyword hits rank first, then semantic hits
-// not already included; the merged list is deduped by `_id`. The optional
-// `category` filter applies to BOTH halves.
+// title words AND meaning. The two ranked lists are fused with Reciprocal Rank
+// Fusion (see below), so results BOTH methods agree on rank first and single-
+// list matches sink; the list is deduped by `_id`. The optional `category`
+// filter applies to BOTH halves.
 //
 // Like semanticSearch, this is the public, anonymous, Gemini-calling entry
 // point, so it consumes a rate-limit token (global bucket) up front.
@@ -969,32 +1023,61 @@ export const hybridSearch = action({
     if (!apiKey) throw new Error('GEMINI_API_KEY is not set in Convex environment variables.')
     const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001'
 
-    const vector = await embedTextForSearch(apiKey, trimmed, embeddingModel, 'RETRIEVAL_QUERY')
-
-    const matches = await ctx.vectorSearch('podcasts', 'by_embedding', {
-      vector,
-      limit: 20,
-      filter: category ? (q) => q.eq('category', category) : undefined,
-    })
+    // See semanticSearch: stripping filler sharpens the embedding onto the
+    // actual topic word(s) instead of generic "this is a podcast" phrasing.
+    // If nothing but filler remains, skip the Gemini call — there's no topic
+    // to embed, and embedding the raw filler scores close to every podcast.
+    const semanticQuery = stripStopWords(trimmed)
+    const matches = semanticQuery
+      ? await (async () => {
+          const vector = await embedTextForSearch(
+            apiKey,
+            semanticQuery,
+            embeddingModel,
+            'RETRIEVAL_QUERY',
+          )
+          return ctx.vectorSearch('podcasts', 'by_embedding', {
+            vector,
+            limit: 20,
+            filter: category ? (q) => q.eq('category', category) : undefined,
+          })
+        })()
+      : []
 
     // vectorSearch returns ranked k-nearest neighbors, never filtered, so apply
-    // the same relevance cutoff semanticSearch uses to drop off-topic hits.
-    const minScore = Number(process.env.GEMINI_SEARCH_MIN_SCORE ?? 0.6)
-    const relevant = matches.filter((m) => m._score >= minScore)
+    // the same adaptive relevance cutoff semanticSearch uses to drop off-topic
+    // hits (see filterRelevantMatches).
+    const relevant = filterRelevantMatches(matches)
     const semanticResults = await ctx.runQuery(internal.podcasts.getReadyByIds, {
       ids: relevant.map((m) => m._id),
     })
 
-    // ── Merge & dedupe by `_id` ─────────────────────────────────────────────
-    // Keyword (exact) matches lead; then semantic matches not already present.
-    const seen = new Set<string>()
-    const merged: HydratedPodcast[] = []
-    for (const p of [...keywordResults, ...semanticResults]) {
-      if (seen.has(p._id)) continue
-      seen.add(p._id)
-      merged.push(p)
+    // ── Fuse the two ranked lists with Reciprocal Rank Fusion (RRF) ─────────
+    // We used to just concatenate (every keyword hit, then every semantic hit),
+    // which let a purely lexical coincidence — a title that merely SHARES A WORD
+    // with the query (e.g. a plane-crash episode matching "trajectory") — outrank
+    // a result both methods actually AGREE on. RRF fixes the ORDER: each list
+    // contributes 1/(k + rank) to every doc it contains, and a doc's score is the
+    // SUM across lists. So a podcast ranked highly by BOTH keyword and semantic
+    // search rises to the top, while a single-list match sinks below the
+    // consensus hits. k=60 is the standard smoothing constant from the original
+    // RRF paper (Cormack et al., 2009). Ties keep keyword-first insertion order
+    // (Array.sort is stable), so behaviour is deterministic.
+    const K = Number(process.env.RRF_K ?? 60)
+    const scoreById = new Map<string, number>()
+    const docById = new Map<string, HydratedPodcast>()
+    const accrue = (list: HydratedPodcast[]) => {
+      list.forEach((doc, i) => {
+        docById.set(doc._id, doc)
+        scoreById.set(doc._id, (scoreById.get(doc._id) ?? 0) + 1 / (K + i + 1))
+      })
     }
-    return merged
+    accrue(keywordResults)
+    accrue(semanticResults)
+
+    return [...docById.values()].sort(
+      (a, b) => (scoreById.get(b._id) ?? 0) - (scoreById.get(a._id) ?? 0),
+    )
   },
 })
 
