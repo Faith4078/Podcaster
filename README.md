@@ -1,239 +1,107 @@
-Welcome to your new TanStack Start app! 
+# Podcaster
 
-# Getting Started
+Describe a topic, get a full podcast episode back — script, narrated audio, and
+cover art generated end to end by AI and instantly discoverable through
+hybrid (keyword + semantic) search.
 
-To run this application:
+## What it does
+
+1. A user gives a topic, category, and voice.
+2. A background pipeline generates a transcript, converts it to speech,
+   creates a cover image, and embeds the content for search all via Google
+   Gemini.
+3. Convex's reactive queries push the UI from "generating" to "ready"
+   automatically no polling, no manual sockets.
+4. Podcasts become searchable by literal keyword match **and** by meaning
+   (vector similarity on the transcript's embedding), fused into one ranked
+   list.
+
+## Stack
+
+| Layer          | Choice                                                                  |
+| -------------- | ----------------------------------------------------------------------- |
+| Frontend       | [TanStack Start](https://tanstack.com/start) (React 19, SSR)            |
+| Backend        | [Convex](https://convex.dev) — reactive database + serverless functions |
+| AI             | Google Gemini — script generation, TTS, image generation, embeddings    |
+| Auth & billing | [Clerk](https://clerk.com) — Free / Pro tiers, server-enforced quotas   |
+| Styling        | Tailwind CSS                                                            |
+| Deployment     | Vercel (SSR)                                                            |
+| Tests          | Vitest + `convex-test` (in-memory Convex backend)                       |
+
+## Getting started
 
 ```bash
 npm install
-npm run dev
+npm run dev       # runs the Convex dev deployment + Vite dev server together
 ```
 
-# Building For Production
-
-To build this application for production:
+Requires a `.env.local` with:
 
 ```bash
-npm run build
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+CLERK_WEBHOOK_SECRET=whsec_...
+CLERK_JWT_ISSUER_DOMAIN=...
+CONVEX_DEPLOYMENT=dev:...
+VITE_CONVEX_URL=...
+VITE_CONVEX_SITE_URL=...
+GEMINI_API_KEY=...
 ```
 
-## Testing
+`GEMINI_API_KEY` also needs to be set in the Convex deployment's own
+environment (`npx convex env set GEMINI_API_KEY ...`), since generation and
+search run server-side as Convex actions.
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+## Scripts
+
+```bash
+npm run dev          # Convex dev + Vite dev, concurrently
+npm run build         # production build
+npm run test          # run the Vitest suite
+npm run check          # Biome lint + format
+```
+
+## Project structure
+
+```
+convex/
+  schema.ts       # data model: users, podcasts, bookmarks, listens, rate limits
+  podcasts.ts      # generation pipeline + search (keyword, semantic, hybrid)
+  bookmarks.ts     # folders + saved podcasts, Free-tier caps
+  rateLimit.ts     # token-bucket limiter for the public Gemini-backed endpoints
+  http.ts          # Clerk billing webhook
+
+src/
+  routes/          # file-based routes (TanStack Router)
+    _authenticated/ # routes that require sign-in (create, profile)
+  components/       # UI components
+  integrations/      # Clerk provider, TanStack Query setup
+
+docs/                # design notes and PRD
+```
+
+## How search works
+
+Search runs two independent passes and fuses the results:
+
+- **Keyword** (`searchPodcasts`) — Convex full-text index over titles.
+  Stop words and generic filler ("podcast", "about", "episode"...) are
+  stripped from the query first so a search doesn't match on incidental
+  shared words.
+- **Semantic** (`semanticSearch`) — the query is embedded with Gemini and
+  compared against each podcast's stored embedding via cosine similarity.
+  Only matches within an adaptive margin of the top score survive, so a
+  loosely-related result doesn't ride along with a strong one.
+- **Hybrid** (`hybridSearch`) — both lists are merged with Reciprocal Rank
+  Fusion: a result both methods agree on ranks above a result only one
+  method found.
+
+## Testing
 
 ```bash
 npm run test
 ```
 
-## Styling
-
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
-
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `npm install @tailwindcss/vite tailwindcss -D`
-
-
-## Setting up Clerk
-
-1. Sign up at [clerk.com](https://clerk.com) and create an application
-2. Copy the **Publishable Key** from the Clerk dashboard
-3. Set it in your `.env.local`:
-   ```bash
-   VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
-   ```
-4. Visit the demo route at `/demo/clerk` once `npm run dev` is running
-
-### What's wired up
-
-- **`<ClerkProvider>`** at the app root (`src/integrations/clerk/provider.tsx`) handles auth context for the whole tree
-- **`<SignInButton>` / `<UserButton>`** in the header swap based on auth state
-- **`/demo/clerk`** shows Clerk's prebuilt sign-in UI and a signed-in greeting
-
-### Protecting a route
-
-Wrap any component in `<SignedIn>` / `<SignedOut>`:
-
-```tsx
-import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
-
-function ProtectedPage() {
-  return (
-    <>
-      <SignedIn>
-        <YourPageContent />
-      </SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </>
-  )
-}
-```
-
-For server-side checks (route loaders, server functions), see the Clerk docs on [`auth()`](https://clerk.com/docs/references/backend/auth).
-
-### Production checklist
-
-- Replace the test keys with **production keys** from a dedicated production Clerk instance
-- Configure your production domain under **Domains** in the Clerk dashboard
-- Set up social providers (Google, GitHub, etc.) under **User & Authentication → Social Connections**
-
-
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+The suite runs against an in-memory Convex backend (`convex-test`) with the
+Gemini HTTP calls stubbed, so it exercises real query/mutation/action logic
+without network calls or a live deployment.

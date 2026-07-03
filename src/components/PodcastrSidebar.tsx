@@ -1,9 +1,17 @@
-import { Show, UserButton, useUser } from '@clerk/tanstack-react-start'
-import { Link } from '@tanstack/react-router'
-import { useMutation } from 'convex/react'
-import { Bookmark, Compass, CreditCard, Home, Mic, User, X } from 'lucide-react'
-import { useEffect } from 'react'
-import { api } from '../../convex/_generated/api'
+import { Show, UserButton, useUser } from '@clerk/tanstack-react-start';
+import { Link } from '@tanstack/react-router';
+import { useMutation } from 'convex/react';
+import {
+  Bookmark,
+  Compass,
+  CreditCard,
+  Home,
+  Mic,
+  User,
+  X,
+} from 'lucide-react';
+import { useEffect } from 'react';
+import { api } from '../../convex/_generated/api';
 
 const navItems = [
   { to: '/' as const, icon: Home, label: 'Home', exact: true },
@@ -12,29 +20,29 @@ const navItems = [
   { to: '/create-podcast' as const, icon: Mic, label: 'Create Podcast' },
   { to: '/my-profile' as const, icon: User, label: 'My Profile' },
   { to: '/billing' as const, icon: CreditCard, label: 'Billing' },
-]
+];
 
 export default function PodcastrSidebar({
   open = false,
   onClose,
 }: {
   /** Mobile drawer open state (ignored on md+, where the sidebar is always shown). */
-  open?: boolean
-  onClose?: () => void
+  open?: boolean;
+  onClose?: () => void;
 }) {
-  const { user } = useUser()
-  const ensureCurrentUser = useMutation(api.users.ensureCurrentUser)
+  const { user } = useUser();
+  const ensureCurrentUser = useMutation(api.users.ensureCurrentUser);
 
   // Local-dev fallback: upsert current Clerk user into Convex on first load
   useEffect(() => {
-    if (!user) return
+    if (!user) return;
     ensureCurrentUser({
       clerkId: user.id,
       name: user.fullName ?? user.username ?? 'User',
       email: user.primaryEmailAddress?.emailAddress ?? '',
       imageUrl: user.imageUrl ?? undefined,
-    }).catch(console.error)
-  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    }).catch(console.error);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -56,10 +64,18 @@ export default function PodcastrSidebar({
       >
         {/* Logo (+ mobile close button) */}
         <div className="flex items-center gap-3 px-7 py-8">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
             <path d="M4 3.5L21 12L4 20.5V3.5Z" fill="#f97535" />
           </svg>
-          <span className="text-xl font-bold tracking-tight text-white">Podcastr</span>
+          <span className="text-xl font-bold tracking-tight text-white">
+            Podcaster
+          </span>
           <button
             type="button"
             onClick={onClose}
@@ -139,5 +155,5 @@ export default function PodcastrSidebar({
         </div>
       </aside>
     </>
-  )
+  );
 }
