@@ -89,7 +89,7 @@ subscription.updated      subscriptionItem.updated
 subscription.active        subscriptionItem.active
 ```
 
-> ⚠️ **Verify the real event names** Clerk actually sends under
+> ⚠️ **Verify the real event names** Clerk actually sendsunder
 > **Webhooks → Message attempts** after a test subscription. If they differ, update the
 > `SUBSCRIPTION_EVENT_TYPES` set in `convex/http.ts` (one place). Likewise confirm the
 > active-Pro detection reads the `pro` plan slug from the real payload shape.
