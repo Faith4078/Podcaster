@@ -16,7 +16,7 @@ todos.json
 # Local agent state (worktrees, node_modules, local settings)
 .claude/
 
-# Personal / draft write-ups (keep local only)
+# Personal writeups
 docs/writeups/
 
 # npm-only project — do not commit pnpm artifacts
