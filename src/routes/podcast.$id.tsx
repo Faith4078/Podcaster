@@ -3,6 +3,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useAction, useMutation, useQuery } from 'convex/react'
 import { AlertCircle, BarChart3, Crown, Edit2, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api } from '../../convex/_generated/api'
 import type { Id } from '../../convex/_generated/dataModel'
 import BookmarkButton from '../components/BookmarkButton'
@@ -117,6 +118,22 @@ function PodcastDetailPage() {
     }
   }
 
+  async function handleRetry() {
+    try {
+      await retry({ podcastId: id as Id<'podcasts'> })
+    } catch (err) {
+      if ((err as { data?: { code?: string } })?.data?.code === 'RATE_LIMITED') {
+        toast.error(
+          (err as { data?: { message?: string } }).data?.message ??
+            'Generation is busy right now. Please try again in a minute.',
+        )
+      } else {
+        console.error('Failed to retry generation', err)
+        toast.error('Failed to retry generation. Please try again.')
+      }
+    }
+  }
+
   async function handleDelete() {
     if (!convexUser || !podcast) return
     setIsDeleting(true)
@@ -225,7 +242,7 @@ function PodcastDetailPage() {
           )}
           <button
             type="button"
-            onClick={() => retry({ podcastId: id as Id<'podcasts'> })}
+            onClick={() => handleRetry()}
             className="flex items-center gap-2 mx-auto rounded-md bg-[#f97535] px-6 py-3 text-base font-bold text-white hover:opacity-90 transition-opacity"
           >
             <RefreshCw size={16} />
@@ -365,7 +382,7 @@ function PodcastDetailPage() {
                   <p className="text-[#71788B] text-sm">No audio file for this episode yet.</p>
                   <button
                     type="button"
-                    onClick={() => retry({ podcastId: id as Id<'podcasts'> })}
+                    onClick={() => handleRetry()}
                     className="flex items-center gap-2 rounded-md border border-[#252525] bg-[#15171C] px-4 py-2 text-sm font-bold text-[#f97535] hover:border-[#f97535]/40 transition-colors"
                   >
                     <RefreshCw size={14} />

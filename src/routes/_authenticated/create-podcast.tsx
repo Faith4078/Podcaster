@@ -158,6 +158,11 @@ function CreatePodcastPage() {
       // Defensive: surface the upgrade wall instead of a raw error on a quota race.
       if ((err as { data?: { code?: string } })?.data?.code === 'QUOTA_EXCEEDED') {
         setQuotaHit(true)
+      } else if ((err as { data?: { code?: string } })?.data?.code === 'RATE_LIMITED') {
+        toast.error(
+          (err as { data?: { message?: string } }).data?.message ??
+            'Generation is busy right now. Please try again in a minute.',
+        )
       } else {
         console.error('Failed to create podcast', err)
         toast.error('Failed to create podcast. Please try again.')

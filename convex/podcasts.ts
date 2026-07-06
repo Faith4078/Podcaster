@@ -497,7 +497,11 @@ function geminiRetryDelayMs(err: unknown, attempt: number): number | null {
   const msg = String(err)
   if (!msg.includes('429')) return null
   const match = msg.match(/retry in ([\d.]+)s/i)
-  const delay = match ? Math.ceil(Number(match[1]) * 1000) + 500 : (attempt + 1) * 5000
+  // Random jitter so concurrent pipelines that hit the same 429 don't retry in
+  // lockstep and re-collide: parsed delays get +0–500ms, the fallback +0–2s.
+  const delay = match
+    ? Math.ceil(Number(match[1]) * 1000) + Math.random() * 500
+    : (attempt + 1) * 5000 + Math.random() * 2000
   return delay > MAX_GEMINI_RETRY_DELAY_MS ? null : delay
 }
 
@@ -514,6 +518,26 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promis
     }
   }
   throw lastErr
+}
+
+// Same detection userFacingErrorMessage uses for its "high demand" branch —
+// shared so the pipeline can decide to requeue on a rate limit rather than fail.
+function isRateLimitError(err: unknown): boolean {
+  return /429|RESOURCE_EXHAUSTED|rate limit|quota/i.test(String(err))
+}
+
+// errorMsg is shown verbatim in the UI, so never surface raw provider errors
+// (e.g. Google's 429 rate-limit text). Map them to friendly messages here; the
+// raw error stays in console.error logs for debugging.
+function userFacingErrorMessage(err: unknown, step: string): string {
+  const msg = String(err)
+  if (/429|RESOURCE_EXHAUSTED|rate limit|quota/i.test(msg)) {
+    return "We're experiencing high demand right now. Please retry in a few minutes."
+  }
+  if (/401|403|API key/i.test(msg)) {
+    return 'Generation service is misconfigured. Please contact support.'
+  }
+  return `${step} failed. Please retry.`
 }
 
 async function embedTextForSearch(
@@ -696,10 +720,47 @@ function buildThumbnailPrompt(podcast: {
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
-// Internal: the actual generation pipeline.
+// A rate-limited step exhausts its in-action retries within seconds (see
+// MAX_GEMINI_RETRY_DELAY_MS), but the quota usually recovers on the order of
+// minutes. Rather than marking the podcast failed and making the user retry by
+// hand, requeue the whole pipeline via the scheduler with a growing delay
+// (60s → 120s → 240s, plus jitter), up to this many requeues. Requeues bypass
+// the generation token bucket intentionally — they're internal continuation of
+// already-admitted work, not new user demand.
+const MAX_RATE_LIMIT_REQUEUES = 3
+
+function requeueDelayMs(attempt: number): number {
+  return 60_000 * 2 ** attempt + Math.random() * 10_000
+}
+
+// Internal: the actual generation pipeline. `attempt` counts scheduler-based
+// requeues after rate-limit failures (0 = first run).
 export const runPipeline = internalAction({
-  args: { podcastId: v.id('podcasts') },
-  handler: async (ctx, { podcastId }) => {
+  args: { podcastId: v.id('podcasts'), attempt: v.optional(v.number()) },
+  handler: async (ctx, { podcastId, attempt = 0 }) => {
+    // On a rate-limit failure: requeue (status stays 'generating' — the detail
+    // page keeps showing live progress) until the cap, then fail with the
+    // existing friendly message.
+    const failOrRequeue = async (err: unknown, failedStep: string, stepLabel: string) => {
+      if (isRateLimitError(err) && attempt < MAX_RATE_LIMIT_REQUEUES) {
+        const delayMs = requeueDelayMs(attempt)
+        console.error(
+          `${stepLabel} rate-limited; requeueing pipeline in ${Math.round(delayMs / 1000)}s (attempt ${attempt + 1}/${MAX_RATE_LIMIT_REQUEUES})`,
+        )
+        await ctx.scheduler.runAfter(delayMs, internal.podcasts.runPipeline, {
+          podcastId,
+          attempt: attempt + 1,
+        })
+        return
+      }
+      await ctx.runMutation(internal.podcasts.setPipelineStatus, {
+        id: podcastId,
+        status: 'failed',
+        failedStep,
+        errorMsg: userFacingErrorMessage(err, stepLabel),
+      })
+    }
+
     await ctx.runMutation(internal.podcasts.setPipelineStatus, {
       id: podcastId,
       status: 'generating',
@@ -725,8 +786,14 @@ export const runPipeline = internalAction({
     const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001'
 
     // ── Step 1: Generate transcript ──────────────────────────────────────────
+    // A stored transcript is always valid to reuse: applyEdit clears it whenever
+    // an edit needs regeneration, so if it's still here it matches the current
+    // prompt. Skipping the call means a requeue after an audio-step rate limit
+    // doesn't burn another script generation.
     let transcript: string
-    try {
+    if (podcast.transcript) {
+      transcript = podcast.transcript
+    } else try {
       const model = genAI.getGenerativeModel({ model: scriptModel })
       const prompt = `You are writing a podcast episode script for a single-speaker show.
 
@@ -754,12 +821,8 @@ Write the script now:`
         transcript,
       })
     } catch (err) {
-      await ctx.runMutation(internal.podcasts.setPipelineStatus, {
-        id: podcastId,
-        status: 'failed',
-        failedStep: 'generating_script',
-        errorMsg: String(err),
-      })
+      console.error('Script generation failed:', String(err))
+      await failOrRequeue(err, 'generating_script', 'Script generation')
       return
     }
 
@@ -780,6 +843,7 @@ Write the script now:`
     // ── Step 3: Audio generation ─────────────────────────────────────────────
     let audioSaved = false
     let audioError: string | undefined
+    let audioErr: unknown // raw error, kept for rate-limit requeue detection
     try {
       const ttsModel = genAI.getGenerativeModel({ model: ttsModelName })
       const geminiVoice = GEMINI_VOICE_MAP[podcast.speaker1Voice] ?? 'Kore'
@@ -815,11 +879,18 @@ Write the script now:`
         audioError = 'Gemini TTS response did not include audio data.'
       }
     } catch (err) {
-      audioError = String(err)
-      console.error('Audio generation failed:', audioError)
+      console.error('Audio generation failed:', String(err))
+      audioErr = err
+      audioError = userFacingErrorMessage(err, 'Audio generation')
     }
 
     if (!audioSaved) {
+      // Rate-limited TTS gets requeued (the saved transcript is reused on the
+      // re-run, so no extra script call); anything else fails as before.
+      if (audioErr !== undefined && isRateLimitError(audioErr)) {
+        await failOrRequeue(audioErr, 'generating_audio', 'Audio generation')
+        return
+      }
       await ctx.runMutation(internal.podcasts.setPipelineStatus, {
         id: podcastId,
         status: 'failed',
@@ -867,6 +938,10 @@ export const generatePodcast = action({
       throw new ConvexError({ code: 'QUOTA_EXCEEDED' })
     }
 
+    // Global throughput throttle (after the quota check so quota errors take
+    // precedence). Throws RATE_LIMITED to the client when the bucket is empty.
+    await ctx.runMutation(internal.rateLimit.consumeGenerationToken, {})
+
     // Run the pipeline in the BACKGROUND so this action returns immediately. The
     // pipeline (transcript → audio → thumbnail) can take minutes; awaiting it
     // here would block the client and blow the 600s action cap. The detail page
@@ -890,6 +965,9 @@ export const regenerateThumbnail = action({
 export const retryGeneration = action({
   args: { podcastId: v.id('podcasts') },
   handler: async (ctx, { podcastId }) => {
+    // Global throughput throttle — throws RATE_LIMITED when the bucket is empty.
+    await ctx.runMutation(internal.rateLimit.consumeGenerationToken, {})
+
     // Reset to pending so the pipeline re-runs cleanly
     await ctx.runMutation(internal.podcasts.setPipelineStatus, {
       id: podcastId,
