@@ -131,6 +131,25 @@ export const getReadyByIds = internalQuery({
   },
 })
 
+// Internal: all `ready` podcasts whose category matches (case-insensitive),
+// author + media resolved. Powers the category-browse half of hybridSearch: a
+// query that IS a category name ("business") is a browse intent, and these are
+// its exact answers regardless of similarity scores. No `by_category` index —
+// the ready set is small (per-user lifetime caps), so an in-code filter over
+// `by_status` is fine.
+export const getReadyByCategory = internalQuery({
+  args: { category: v.string() },
+  handler: async (ctx, { category }) => {
+    const lower = category.toLowerCase()
+    const ready = await ctx.db
+      .query('podcasts')
+      .withIndex('by_status', (q) => q.eq('status', 'ready'))
+      .collect()
+    const inCategory = ready.filter((p) => p.category.toLowerCase() === lower)
+    return Promise.all(inCategory.map((p) => withAuthorAndMedia(ctx, p)))
+  },
+})
+
 // Trivial words carry no search signal and only dilute a full-text query
 // ("the startup" should match on "startup"). We strip them before the keyword
 // search so short, intent-y queries still land on the meaningful tokens.
@@ -572,6 +591,23 @@ async function embedTextForSearch(
   return data.embedding.values
 }
 
+// The document text we embed for semantic search. The category is included
+// explicitly: it's the one piece of topical metadata the author states outright,
+// and without it a stocks episode filed under "Business" carries no "business"
+// signal at all — a "business" query then has to bridge stocks→business purely
+// from transcript similarity, which routinely lands under the relevance cutoff.
+// Shared by the pipeline (step 2) and the embedding backfill so both always
+// embed the same shape of text.
+function buildEmbeddingText(
+  podcast: { title: string; category: string; description: string },
+  transcript: string,
+): string {
+  return `${podcast.title}\nCategory: ${podcast.category}\n\n${podcast.description}\n\n${transcript}`.slice(
+    0,
+    2000,
+  )
+}
+
 const DEFAULT_IMAGE_MODELS = [
   'gemini-3.1-flash-image',
   'gemini-2.5-flash-image',
@@ -828,8 +864,7 @@ Write the script now:`
 
     // ── Step 2: Generate embedding for semantic search ───────────────────────
     try {
-      const textToEmbed =
-        `${podcast.title}\n\n${podcast.description}\n\n${transcript}`.slice(0, 2000)
+      const textToEmbed = buildEmbeddingText(podcast, transcript)
       const embedding = await embedTextForSearch(apiKey, textToEmbed, embeddingModel)
       await ctx.runMutation(internal.podcasts.saveGeneratedFields, {
         id: podcastId,
@@ -1096,6 +1131,22 @@ export const hybridSearch = action({
       category,
     })
 
+    // ── Category-browse half: a query that IS a category name ("business") is
+    // a browse intent — every podcast the author filed under that category is
+    // an exact answer, no similarity required. Without this, a stocks episode
+    // categorized "Business" only surfaces if the embedding bridges
+    // stocks→business hard enough to clear the relevance cutoff, and the
+    // adaptive margin lets a transcript that merely SAYS "business" a lot
+    // (e.g. a SaaS episode) crowd it out. Matched against the cleaned query so
+    // "business podcasts" still counts as browsing Business.
+    const cleanedForCategory = stripStopWords(trimmed).toLowerCase()
+    const categoryResults =
+      cleanedForCategory && !category
+        ? await ctx.runQuery(internal.podcasts.getReadyByCategory, {
+            category: cleanedForCategory,
+          })
+        : []
+
     // ── Semantic half: embed the query and vector-search by meaning ─────────
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) throw new Error('GEMINI_API_KEY is not set in Convex environment variables.')
@@ -1152,11 +1203,53 @@ export const hybridSearch = action({
     }
     accrue(keywordResults)
     accrue(semanticResults)
+    accrue(categoryResults)
 
     return [...docById.values()].sort(
       (a, b) => (scoreById.get(b._id) ?? 0) - (scoreById.get(a._id) ?? 0),
     )
   },
+})
+
+// Internal: re-embed every ready podcast with the current buildEmbeddingText
+// shape (title + category + description + transcript). One-off maintenance —
+// run after changing what gets embedded, e.g.
+//   npx convex run podcasts:backfillEmbeddings
+// Sequential with the standard 429 retry so it doesn't trip Gemini rate limits.
+export const backfillEmbeddings = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) throw new Error('GEMINI_API_KEY is not set in Convex environment variables.')
+    const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001'
+
+    const ready = await ctx.runQuery(internal.podcasts.getAllReady, {})
+    let updated = 0
+    for (const podcast of ready) {
+      const textToEmbed = buildEmbeddingText(podcast, podcast.transcript ?? '')
+      const embedding = await withGeminiRetry(() =>
+        embedTextForSearch(apiKey, textToEmbed, embeddingModel),
+      )
+      await ctx.runMutation(internal.podcasts.saveGeneratedFields, {
+        id: podcast._id,
+        embedding,
+      })
+      updated++
+    }
+    console.log(`Backfilled embeddings for ${updated} podcast(s).`)
+    return updated
+  },
+})
+
+// Internal: raw ready podcasts (no media/author hydration) for the embedding
+// backfill, which only needs the text fields.
+export const getAllReady = internalQuery({
+  args: {},
+  handler: (ctx) =>
+    ctx.db
+      .query('podcasts')
+      .withIndex('by_status', (q) => q.eq('status', 'ready'))
+      .collect(),
 })
 
 // Public: "You Might Also Like" — vector-nearest podcasts to the given one,
