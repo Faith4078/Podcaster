@@ -15,7 +15,9 @@ import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SignUpIndexRouteImport } from './routes/sign-up/index'
 import { Route as SignInIndexRouteImport } from './routes/sign-in/index'
+import { Route as SignUpSsoCallbackRouteImport } from './routes/sign-up/sso-callback'
 import { Route as SignInSsoCallbackRouteImport } from './routes/sign-in/sso-callback'
 import { Route as PodcastIdRouteImport } from './routes/podcast.$id'
 import { Route as EditIdRouteImport } from './routes/edit.$id'
@@ -53,9 +55,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SignUpIndexRoute = SignUpIndexRouteImport.update({
+  id: '/sign-up/',
+  path: '/sign-up/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInIndexRoute = SignInIndexRouteImport.update({
   id: '/sign-in/',
   path: '/sign-in/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpSsoCallbackRoute = SignUpSsoCallbackRouteImport.update({
+  id: '/sign-up/sso-callback',
+  path: '/sign-up/sso-callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInSsoCallbackRoute = SignInSsoCallbackRouteImport.update({
@@ -108,7 +120,9 @@ export interface FileRoutesByFullPath {
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
   '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
+  '/sign-up/sso-callback': typeof SignUpSsoCallbackRoute
   '/sign-in/': typeof SignInIndexRoute
+  '/sign-up/': typeof SignUpIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -123,7 +137,9 @@ export interface FileRoutesByTo {
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
   '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
+  '/sign-up/sso-callback': typeof SignUpSsoCallbackRoute
   '/sign-in': typeof SignInIndexRoute
+  '/sign-up': typeof SignUpIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -140,7 +156,9 @@ export interface FileRoutesById {
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
   '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
+  '/sign-up/sso-callback': typeof SignUpSsoCallbackRoute
   '/sign-in/': typeof SignInIndexRoute
+  '/sign-up/': typeof SignUpIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,7 +175,9 @@ export interface FileRouteTypes {
     | '/edit/$id'
     | '/podcast/$id'
     | '/sign-in/sso-callback'
+    | '/sign-up/sso-callback'
     | '/sign-in/'
+    | '/sign-up/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -172,7 +192,9 @@ export interface FileRouteTypes {
     | '/edit/$id'
     | '/podcast/$id'
     | '/sign-in/sso-callback'
+    | '/sign-up/sso-callback'
     | '/sign-in'
+    | '/sign-up'
   id:
     | '__root__'
     | '/'
@@ -188,7 +210,9 @@ export interface FileRouteTypes {
     | '/edit/$id'
     | '/podcast/$id'
     | '/sign-in/sso-callback'
+    | '/sign-up/sso-callback'
     | '/sign-in/'
+    | '/sign-up/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -203,7 +227,9 @@ export interface RootRouteChildren {
   EditIdRoute: typeof EditIdRoute
   PodcastIdRoute: typeof PodcastIdRoute
   SignInSsoCallbackRoute: typeof SignInSsoCallbackRoute
+  SignUpSsoCallbackRoute: typeof SignUpSsoCallbackRoute
   SignInIndexRoute: typeof SignInIndexRoute
+  SignUpIndexRoute: typeof SignUpIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -250,11 +276,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sign-up/': {
+      id: '/sign-up/'
+      path: '/sign-up'
+      fullPath: '/sign-up/'
+      preLoaderRoute: typeof SignUpIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in/': {
       id: '/sign-in/'
       path: '/sign-in'
       fullPath: '/sign-in/'
       preLoaderRoute: typeof SignInIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up/sso-callback': {
+      id: '/sign-up/sso-callback'
+      path: '/sign-up/sso-callback'
+      fullPath: '/sign-up/sso-callback'
+      preLoaderRoute: typeof SignUpSsoCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in/sso-callback': {
@@ -335,7 +375,9 @@ const rootRouteChildren: RootRouteChildren = {
   EditIdRoute: EditIdRoute,
   PodcastIdRoute: PodcastIdRoute,
   SignInSsoCallbackRoute: SignInSsoCallbackRoute,
+  SignUpSsoCallbackRoute: SignUpSsoCallbackRoute,
   SignInIndexRoute: SignInIndexRoute,
+  SignUpIndexRoute: SignUpIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

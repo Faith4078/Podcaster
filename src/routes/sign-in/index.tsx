@@ -6,40 +6,12 @@ export const Route = createFileRoute('/sign-in/')({
   component: SignInPage,
 });
 
-const clerkAppearance = {
-  variables: {
-    // Brand accent — orange
-    colorPrimary: '#f97535',
-    colorPrimaryForeground: '#ffffff',
-
-    // Card background — solid, never transparent
-    colorBackground: '#13162b',
-
-    // Text colors — high contrast against #13162b
-    colorForeground: '#ffffff',
-    colorMutedForeground: '#b0b8d1',
-
-    // Input fields
-    colorInput: '#1c1f38',
-    colorInputForeground: '#ffffff',
-
-    // Misc
-    colorNeutral: '#8892❯b0',
-    colorDanger: '#f87171',
-    colorSuccess: '#4ade80',
-    colorWarning: '#fbbf24',
-
-    // Shape
-    borderRadius: '10px',
-    fontFamily: 'inherit',
-    fontSize: '14px',
-  },
-} as const;
-
+// Theming comes from the app-wide ClerkProvider `appearance`
+// (src/integrations/clerk/provider.tsx) — don't override it here.
 function SignInPage() {
   return (
     <AuthPageLayout>
-      <SignIn appearance={clerkAppearance} />
+      <SignIn />
     </AuthPageLayout>
   );
 }
