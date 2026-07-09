@@ -1112,6 +1112,62 @@ export const semanticSearch = action({
   },
 })
 
+// Optional cross-encoder RERANK stage (Cohere Rerank). A bi-encoder embedding
+// search scores query and document SEPARATELY, so "adjacent concept" queries
+// (e.g. "financial markets" vs a "stocks" episode) can land just under the
+// vector relevance floor and get dropped. A reranker reads the query and each
+// candidate TOGETHER and scores true relevance, rescuing those matches. This is
+// additive and fail-safe: it runs only when COHERE_API_KEY is set, and returns
+// null (→ caller keeps the RRF ordering) if the key is unset or the API errors.
+async function rerankWithCohere(
+  query: string,
+  docs: HydratedPodcast[],
+): Promise<HydratedPodcast[] | null> {
+  const apiKey = process.env.COHERE_API_KEY
+  if (!apiKey || docs.length === 0) return null
+
+  const model = process.env.COHERE_RERANK_MODEL ?? 'rerank-v3.5'
+  // Give the reranker the text it should judge relevance against — title carries
+  // the most signal; description adds topical context. Capped so a long
+  // description can't blow the request size.
+  const documents = docs.map((d) =>
+    `${d.title}. ${d.description ?? ''}`.slice(0, 1000),
+  )
+
+  try {
+    const res = await fetch('https://api.cohere.com/v2/rerank', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        query,
+        documents,
+        top_n: Math.min(docs.length, 20),
+      }),
+    })
+    if (!res.ok) {
+      console.error('Cohere rerank failed:', res.status, await res.text().catch(() => ''))
+      return null
+    }
+    const data = (await res.json()) as {
+      results: { index: number; relevance_score: number }[]
+    }
+    // Optional relevance floor so the reranker ALSO drops genuinely off-topic
+    // candidates (default 0 = keep the reranker's full ordering).
+    const floor = Number(process.env.COHERE_RERANK_MIN_SCORE ?? 0)
+    return data.results
+      .filter((r) => r.relevance_score >= floor)
+      .map((r) => docs[r.index])
+      .filter((d): d is HydratedPodcast => Boolean(d))
+  } catch (err) {
+    console.error('Cohere rerank error:', String(err))
+    return null
+  }
+}
+
 // Public: HYBRID search — combine a literal KEYWORD search (full-text over
 // titles) with the SEMANTIC vector search, so the box matches both literal
 // title words AND meaning. The two ranked lists are fused with Reciprocal Rank
@@ -1185,6 +1241,24 @@ export const hybridSearch = action({
       ids: relevant.map((m) => m._id),
     })
 
+    // ── Optional rerank stage ───────────────────────────────────────────────
+    // When a reranker is configured, hand it the FULL candidate union —
+    // including the vector neighbours BELOW the relevance floor (the whole point
+    // is to let the cross-encoder rescue adjacent-concept matches the floor would
+    // drop). The reranker returns the final order; if it's not configured or
+    // errors, we fall through to RRF below (unchanged behaviour).
+    if (process.env.COHERE_API_KEY) {
+      const allSemantic = await ctx.runQuery(internal.podcasts.getReadyByIds, {
+        ids: matches.map((m) => m._id),
+      })
+      const pool = new Map<string, HydratedPodcast>()
+      for (const d of [...keywordResults, ...categoryResults, ...allSemantic]) {
+        pool.set(d._id, d)
+      }
+      const reranked = await rerankWithCohere(trimmed, [...pool.values()])
+      if (reranked) return reranked
+    }
+
     // ── Fuse the two ranked lists with Reciprocal Rank Fusion (RRF) ─────────
     // We used to just concatenate (every keyword hit, then every semantic hit),
     // which let a purely lexical coincidence — a title that merely SHARES A WORD
@@ -1254,6 +1328,74 @@ export const getAllReady = internalQuery({
       .query('podcasts')
       .withIndex('by_status', (q) => q.eq('status', 'ready'))
       .collect(),
+})
+
+// Diagnostic: which ready podcasts have a stored embedding (i.e. are visible to
+// SEMANTIC search) vs only KEYWORD search. A podcast whose embedding step failed
+// silently at creation shows hasEmbedding:false and can only be found by literal
+// title match. Run it with:  npx convex run podcasts:embeddingReport
+// Fix any missing ones with:  npx convex run podcasts:backfillEmbeddings
+// Internal (admin/CLI only) — not exposed to the public client.
+export const embeddingReport = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const ready = await ctx.db
+      .query('podcasts')
+      .withIndex('by_status', (q) => q.eq('status', 'ready'))
+      .collect()
+    return ready.map((p) => ({
+      title: p.title,
+      category: p.category,
+      hasEmbedding: Array.isArray(p.embedding) && p.embedding.length > 0,
+    }))
+  },
+})
+
+// Diagnostic: show the RAW semantic similarity score of every vector neighbour
+// for a query — BEFORE the relevance cutoff — so you can see where a given
+// podcast lands relative to GEMINI_SEARCH_MIN_SCORE (default 0.6). Run with:
+//   npx convex run podcasts:debugSemanticScores '{"query":"financial markets"}'
+// Internal (admin/CLI only) — it calls Gemini, so it must NOT be publicly
+// callable (that would be an un-rate-limited abuse vector).
+export const debugSemanticScores = internalAction({
+  args: { query: v.string() },
+  handler: async (
+    ctx,
+    { query },
+  ): Promise<{
+    floor: number
+    semanticQuery: string
+    results: { title: string; score: number; passesFloor: boolean }[]
+  }> => {
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) throw new Error('GEMINI_API_KEY is not set.')
+    const embeddingModel = process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001'
+    const semanticQuery = stripStopWords(query.trim()) || query.trim()
+    const vector = await embedTextForSearch(
+      apiKey,
+      semanticQuery,
+      embeddingModel,
+      'RETRIEVAL_QUERY',
+    )
+    const matches = await ctx.vectorSearch('podcasts', 'by_embedding', {
+      vector,
+      limit: 20,
+    })
+    const docs = await ctx.runQuery(internal.podcasts.getReadyByIds, {
+      ids: matches.map((m) => m._id),
+    })
+    const titleById = new Map(docs.map((d) => [d._id, d.title]))
+    const floor = Number(process.env.GEMINI_SEARCH_MIN_SCORE ?? 0.6)
+    return {
+      floor,
+      semanticQuery,
+      results: matches.map((m) => ({
+        title: titleById.get(m._id) ?? m._id,
+        score: Number(m._score.toFixed(3)),
+        passesFloor: m._score >= floor,
+      })),
+    }
+  },
 })
 
 // Public: "You Might Also Like" — vector-nearest podcasts to the given one,
