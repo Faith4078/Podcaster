@@ -349,8 +349,9 @@ export default function MiniPlayer() {
         <div
           className="fixed inset-0 z-[60] flex flex-col px-6 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(2rem+env(safe-area-inset-bottom))]"
           style={{
-            background: `linear-gradient(180deg, ${imageGradient.from}33, #101114 55%, #0a0c14)`,
-            backdropFilter: 'blur(24px)',
+            // Fully OPAQUE so nothing behind the full-screen view shows through.
+            backgroundColor: '#0a0c14',
+            backgroundImage: `linear-gradient(180deg, ${imageGradient.from}, #101114 45%, #0a0c14)`,
           }}
         >
           {/* Header — collapse back to the mini bar */}
