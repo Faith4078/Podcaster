@@ -17,7 +17,10 @@ todos.json
 .claude/
 
 # Personal writeups
-docs/writeups/
+docs/writeups
+docs/billing
+docs/search
+
 
 # npm-only project — do not commit pnpm artifacts
 pnpm-lock.yaml
