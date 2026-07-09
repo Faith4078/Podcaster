@@ -1300,19 +1300,28 @@ export const hybridSearch = action({
     // If nothing but filler remains, skip the Gemini call — there's no topic
     // to embed, and embedding the raw filler scores close to every podcast.
     const semanticQuery = stripStopWords(trimmed)
+    // The embedding call is a network hop to Gemini and was the LAST uncaught
+    // single point of failure in search — the reranker and LLM-judge stages
+    // already fail soft, but a transient embedding 429/5xx used to throw the
+    // whole action, which the UI surfaces as "Search unavailable". Two layers of
+    // safety now: retry transient rate limits (withGeminiRetry, fails fast on a
+    // hard-quota 429), and if it still fails, DEGRADE to keyword/category results
+    // instead of throwing.
     const matches = semanticQuery
       ? await (async () => {
-          const vector = await embedTextForSearch(
-            apiKey,
-            semanticQuery,
-            embeddingModel,
-            'RETRIEVAL_QUERY',
-          )
-          return ctx.vectorSearch('podcasts', 'by_embedding', {
-            vector,
-            limit: 20,
-            filter: category ? (q) => q.eq('category', category) : undefined,
-          })
+          try {
+            const vector = await withGeminiRetry(() =>
+              embedTextForSearch(apiKey, semanticQuery, embeddingModel, 'RETRIEVAL_QUERY'),
+            )
+            return await ctx.vectorSearch('podcasts', 'by_embedding', {
+              vector,
+              limit: 20,
+              filter: category ? (q) => q.eq('category', category) : undefined,
+            })
+          } catch (err) {
+            console.error('Semantic search failed; falling back to keyword/category:', String(err))
+            return []
+          }
         })()
       : []
 
