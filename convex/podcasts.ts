@@ -266,13 +266,17 @@ export const create = mutation({
   },
 })
 
+// Record a QUALIFYING listen. The client (MiniPlayer) calls this once per
+// podcast/session, only after 30 seconds of ACTUAL accumulated playback —
+// never on click/play-start (see LISTEN_THRESHOLD_SECONDS in playerStore).
 export const incrementListeners = mutation({
   args: { id: v.id('podcasts') },
   handler: async (ctx, { id }) => {
     // Count UNIQUE listeners, not plays. Resolve the signed-in user and record a
     // one-time listen per (podcast, user); only the first listen bumps the count,
     // so replaying or reopening the same podcast no longer inflates it.
-    // Anonymous plays (no identity) don't affect the count.
+    // Anonymous plays (no identity) silently no-op — a signed-out user must
+    // never see playback break because a listen couldn't be recorded.
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) return
     const user = await ctx.db

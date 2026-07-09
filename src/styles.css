@@ -71,6 +71,16 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Horizontal carousels (Trending, Popular, Fans Also Like) scroll by swipe/drag
+   but must NOT show a scrollbar — on mobile or desktop. Scrolling still works. */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE/legacy Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Edge */
+}
+
 /* Clerk <UserButton /> popover — the action rows ("Manage account", "Sign out")
    get their color from Clerk's `--accent` token, which is `light-dark(#000,#fff)`.
    The popover resolves to the LIGHT scheme, so the token picks near-black text that

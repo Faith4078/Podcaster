@@ -63,6 +63,18 @@ export default defineSchema({
     .index('by_user_podcast', ['userId', 'podcastId'])
     .index('by_user_folder', ['userId', 'folderId']),
 
+  // One row per (user, podcast) the user has downloaded. Deduped per podcast so
+  // re-downloading the same episode is free; the Free-tier cap counts DISTINCT
+  // podcasts downloaded (FREE_DOWNLOAD_LIMIT in convex/downloads.ts). Pro is
+  // unlimited. `by_user` counts/lists a user's downloads; `by_user_podcast`
+  // powers the "already downloaded?" dedup check.
+  downloads: defineTable({
+    userId: v.id('users'),
+    podcastId: v.id('podcasts'),
+  })
+    .index('by_user', ['userId'])
+    .index('by_user_podcast', ['userId', 'podcastId']),
+
   podcasts: defineTable({
     // Core metadata
     title: v.string(),

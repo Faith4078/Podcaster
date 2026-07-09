@@ -9,6 +9,7 @@
  */
 
 import type * as bookmarks from "../bookmarks.js";
+import type * as downloads from "../downloads.js";
 import type * as http from "../http.js";
 import type * as podcasts from "../podcasts.js";
 import type * as rateLimit from "../rateLimit.js";
@@ -23,6 +24,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   bookmarks: typeof bookmarks;
+  downloads: typeof downloads;
   http: typeof http;
   podcasts: typeof podcasts;
   rateLimit: typeof rateLimit;

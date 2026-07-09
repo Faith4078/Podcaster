@@ -31,15 +31,29 @@ function SmallPodcastCard({
   from,
   to,
   plays,
+  onClick,
 }: {
   name: string
   author: string
   from: string
   to: string
   plays: string
+  onClick: () => void
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-[#15171C] border border-[#252525] hover:border-[#f97535]/30 transition-colors cursor-pointer px-3 py-2.5">
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${name}`}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }}
+      className="flex items-center gap-3 rounded-xl bg-[#15171C] border border-[#252525] hover:border-[#f97535]/30 transition-colors cursor-pointer px-3 py-2.5"
+    >
       <GradientBox from={from} to={to} className="w-10 h-10 rounded-[3px] shrink-0" />
       <div className="min-w-0 flex-1">
         <p className="text-white text-sm font-bold truncate">{name}</p>
@@ -101,7 +115,6 @@ function PodcastDetailPage() {
     }
   }, [id, getSimilar])
 
-  const incrementListeners = useMutation(api.podcasts.incrementListeners)
   const deletePodcast = useMutation(api.podcasts.deletePodcast)
   const retry = useAction(api.podcasts.retryGeneration)
   const regenerateThumbnail = useAction(api.podcasts.regenerateThumbnail)
@@ -258,13 +271,15 @@ function PodcastDetailPage() {
   // ── Ready ─────────────────────────────────────────────────────────────────
   function handlePlay() {
     if (!podcast || podcast.status !== 'ready' || !canPlay || !podcast.audioUrl) return
-    incrementListeners({ id: id as Id<'podcasts'> })
+    // Listens are recorded by the MiniPlayer after 30s of real playback —
+    // clicking play deliberately does NOT count as a listen.
     play({
       id,
       title: podcast.title,
       author: authorName,
       audioUrl: podcast.audioUrl,
       imageGradient: PLACEHOLDER_GRADIENT,
+      thumbnailUrl: podcast.thumbnailUrl ?? undefined,
     })
   }
 
@@ -483,6 +498,12 @@ function PodcastDetailPage() {
                         from={from}
                         to={to}
                         plays={p.listenerCount.toLocaleString()}
+                        onClick={() =>
+                          navigate({
+                            to: '/podcast/$id',
+                            params: { id: p._id as Id<'podcasts'> },
+                          })
+                        }
                       />
                     )
                   })
