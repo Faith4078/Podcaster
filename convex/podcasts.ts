@@ -1168,6 +1168,89 @@ async function rerankWithCohere(
   }
 }
 
+// Optional LLM-AS-JUDGE relevance filter. An embedding search (bi-encoder) and
+// even a cross-encoder reranker output GEOMETRY scores that DON'T calibrate
+// across queries: a sharp query's best hit scores ~0.15 while a broad query
+// scores everything ~0.04, so a sharp query's junk outscores a broad query's
+// real matches and NO fixed threshold can separate them (proven on live data).
+// An LLM doesn't score geometry — it REASONS about the query against each
+// candidate, giving a query-aware keep/drop that DOES transfer across queries.
+// At this catalog size one Gemini call per search buys the precise result set
+// the thresholds couldn't. Fail-safe: returns null (→ caller falls back to
+// rerank/RRF) if disabled or on any error; returns [] when the model finds
+// nothing genuinely relevant (→ honest empty state). Judges by INDEX, never the
+// Convex _id, so the model never has to echo a long random id back verbatim.
+async function judgeRelevanceWithGemini(
+  apiKey: string,
+  query: string,
+  docs: HydratedPodcast[],
+): Promise<HydratedPodcast[] | null> {
+  if (docs.length === 0) return null
+  const model = process.env.GEMINI_JUDGE_MODEL ?? 'gemini-2.5-flash'
+  const catalog = docs
+    .map(
+      (d, i) =>
+        `[${i}] ${d.title} (category: ${d.category}). ${(d.description ?? '').slice(0, 300)}`,
+    )
+    .join('\n')
+  // NOTE: keep this STRICT. On a small, topically-diverse catalog, any inclusive
+  // phrasing ("closely related", "same topic", "would plausibly want") makes the
+  // model rationalize a thread between nearly everything and over-return — it
+  // readmits the exact noise the judge exists to drop (verified: soft prompts
+  // returned Dow under "expectant mothers" and all 11 docs under "technology").
+  // Strict slightly under-returns on broad queries; that is the correct trade.
+  const prompt =
+    `You are a strict search-relevance filter for a podcast app. ` +
+    `The user searched: "${query}".\n\n` +
+    `Candidates (each prefixed with its index):\n${catalog}\n\n` +
+    `Return the indices of ONLY the podcasts genuinely relevant to that search, ` +
+    `ordered most relevant first. Exclude anything that is only loosely or ` +
+    `tangentially related. If none are genuinely relevant, return an empty list.`
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema: { type: 'ARRAY', items: { type: 'INTEGER' } },
+          },
+        }),
+      },
+    )
+    if (!res.ok) {
+      console.error('LLM judge failed:', res.status, await res.text().catch(() => ''))
+      return null
+    }
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[]
+    }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!text) return null
+    const parsed = JSON.parse(text) as unknown
+    if (!Array.isArray(parsed)) return null
+    // Map indices back to docs, preserving the model's order, dropping anything
+    // out of range or duplicated (defensive against a stray hallucinated index).
+    const seen = new Set<number>()
+    const ordered: HydratedPodcast[] = []
+    for (const raw of parsed) {
+      const i = Number(raw)
+      if (!Number.isInteger(i) || i < 0 || i >= docs.length || seen.has(i)) continue
+      seen.add(i)
+      ordered.push(docs[i])
+    }
+    return ordered
+  } catch (err) {
+    console.error('LLM judge error:', String(err))
+    return null
+  }
+}
+
 // Public: HYBRID search — combine a literal KEYWORD search (full-text over
 // titles) with the SEMANTIC vector search, so the box matches both literal
 // title words AND meaning. The two ranked lists are fused with Reciprocal Rank
@@ -1241,18 +1324,42 @@ export const hybridSearch = action({
       ids: relevant.map((m) => m._id),
     })
 
-    // ── Optional rerank stage ───────────────────────────────────────────────
-    // When a reranker is configured, hand it the FULL candidate union —
-    // including the vector neighbours BELOW the relevance floor (the whole point
-    // is to let the cross-encoder rescue adjacent-concept matches the floor would
-    // drop). The reranker returns the final order; if it's not configured or
-    // errors, we fall through to RRF below (unchanged behaviour).
-    if (process.env.COHERE_API_KEY) {
+    // ── Primary stage: LLM-as-judge relevance filter ────────────────────────
+    // When enabled, this is the most PRECISE stage: the LLM reasons about each
+    // candidate against the query, so it both RESCUES adjacent-concept matches
+    // (hence we feed it the FULL raw neighbour union, not just the floor-passing
+    // set) AND cleanly DROPS the loosely-related tail that no geometry threshold
+    // could — giving the exact result set embeddings/reranking can't. Fail-safe:
+    // on any error it returns null and we fall through to the reranker/RRF below.
+    // An empty (but non-null) result is a real answer — "nothing genuinely
+    // relevant" — and is returned as such (honest empty state).
+    if (process.env.SEARCH_LLM_JUDGE === 'true') {
       const allSemantic = await ctx.runQuery(internal.podcasts.getReadyByIds, {
         ids: matches.map((m) => m._id),
       })
       const pool = new Map<string, HydratedPodcast>()
       for (const d of [...keywordResults, ...categoryResults, ...allSemantic]) {
+        pool.set(d._id, d)
+      }
+      const judged = await judgeRelevanceWithGemini(apiKey, trimmed, [...pool.values()])
+      if (judged) return judged
+    }
+
+    // ── Optional rerank stage ───────────────────────────────────────────────
+    // When a reranker is configured, use it to SHARPEN THE ORDER of the results
+    // that already cleared the vector relevance floor — NOT to resurface below-
+    // floor neighbours. An earlier version fed the cross-encoder the full raw
+    // neighbour list to "rescue" sub-floor matches, but Cohere's relevance scores
+    // aren't comparable across queries: a sharp query ("stocks market investing")
+    // scores its best hit ~0.15 while a broad one ("technology") scores ~0.04
+    // across the board — so no absolute COHERE_RERANK_MIN_SCORE can drop sharp-
+    // query junk without also dropping every broad-query match. Letting the tuned
+    // vector floor do the FILTERING and the reranker only the ORDERING sidesteps
+    // that entirely. The reranker returns the final order; if it's unconfigured or
+    // errors, we fall through to RRF below (unchanged behaviour).
+    if (process.env.COHERE_API_KEY) {
+      const pool = new Map<string, HydratedPodcast>()
+      for (const d of [...keywordResults, ...categoryResults, ...semanticResults]) {
         pool.set(d._id, d)
       }
       const reranked = await rerankWithCohere(trimmed, [...pool.values()])

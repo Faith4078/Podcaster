@@ -152,6 +152,20 @@ function DiscoverPage() {
   // flight → skeletons).
   const podcasts = !trimmed ? latestFiltered : searchError ? latestFiltered : semanticResults
 
+  // ── Top matches vs Related ──────────────────────────────────────────────────
+  // The reranker orders results well (best first) but CANNOT reliably *drop* the
+  // loosely-related tail: relevance scores aren't comparable across queries, so
+  // no fixed cutoff separates "stocks" from "expectant mothers" noise. Rather
+  // than fake a threshold, we present the ranking honestly — the first few hits
+  // as "Top matches", the ordered tail as a dimmed "Related" section — so a
+  // low-ranked result stops masquerading as a claimed answer. Search-only; idle
+  // browse and the error-fallback keep the single grid.
+  const TOP_N = 4
+  const isSearch = Boolean(trimmed) && !searchError
+  const showSplit = isSearch && podcasts !== undefined && podcasts.length > TOP_N
+  const topMatches = showSplit ? podcasts!.slice(0, TOP_N) : (podcasts ?? [])
+  const related = showSplit ? podcasts!.slice(TOP_N) : []
+
   return (
     <div className="px-4 py-6 sm:px-6 md:px-8 md:py-8">
       {/* Search */}
@@ -191,9 +205,25 @@ function DiscoverPage() {
       ) : podcasts.length === 0 ? (
         <p className="text-[#71788B] text-sm">
           {trimmed && !searchError
-            ? 'Nothing matches that idea yet — try describing it differently.'
+            ? 'No strong matches for that idea — try describing it differently.'
             : 'No podcasts yet — create the first one!'}
         </p>
+      ) : showSplit ? (
+        <div className="space-y-9">
+          <section>
+            <h2 className="text-sm font-semibold text-white mb-3">Top matches</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+              {topMatches.map((p) => <PodcastRow key={p._id} podcast={p as Podcast} />)}
+            </div>
+          </section>
+          <section>
+            <h2 className="text-sm font-semibold text-[#71788B]">Related</h2>
+            <p className="text-[#71788B] text-xs mt-0.5 mb-3">Loosely related to your search.</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 opacity-70">
+              {related.map((p) => <PodcastRow key={p._id} podcast={p as Podcast} />)}
+            </div>
+          </section>
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
           {podcasts.map((p) => <PodcastRow key={p._id} podcast={p as Podcast} />)}
