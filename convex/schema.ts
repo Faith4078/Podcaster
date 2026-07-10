@@ -24,6 +24,19 @@ export default defineSchema({
     lastRefill: v.number(),
   }).index('by_key', ['key']),
 
+  // Cached LLM-judge verdicts for search (see hybridSearch). One row per
+  // (query, category), upserted in place, so the table stays as small as the
+  // set of distinct queries. The verdict is only reused while `poolHash` still
+  // matches the current candidate set AND the entry is fresh (TTL) — the judge
+  // burns a metered Gemini call per miss, and the search box re-fires on every
+  // keystroke pause, so repeats are the common case worth caching.
+  searchJudgeCache: defineTable({
+    key: v.string(), // normalized `${query}|${category}`
+    poolHash: v.string(), // sorted candidate ids — invalidates when the pool changes
+    ids: v.array(v.string()), // judged podcast ids, most relevant first ([] = "nothing relevant")
+    createdAt: v.number(),
+  }).index('by_key', ['key']),
+
   // One row per (podcast, user) the first time that user plays a podcast, so
   // `listenerCount` reflects UNIQUE listeners rather than total plays/clicks.
   listens: defineTable({

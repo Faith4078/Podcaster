@@ -33,6 +33,56 @@ function stubEmbedder(queryVector: number[]) {
   return fetchMock;
 }
 
+// Route-aware network stub for the full hybrid pipeline: embedding (Gemini),
+// LLM judge (Gemini generateContent), and Cohere rerank. Each stage's response
+// is configurable so tests can put any stage up, down, or rate-limited.
+function stubSearchNetwork(stub: {
+  queryVector?: number[];
+  // 200 → respond with these pool indices as the verdict; anything else → that HTTP status
+  judge?: { status: number; indices?: number[] };
+  // 200 → score pool doc i as scores[i]; anything else → that HTTP status
+  cohere?: { status: number; scores?: number[] };
+}) {
+  const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+    if (u.includes(':embedContent')) {
+      return json({ embedding: { values: stub.queryVector ?? axisVector(0) } });
+    }
+    if (u.includes(':generateContent')) {
+      const judge = stub.judge ?? { status: 429 };
+      if (judge.status !== 200) return new Response('quota exceeded', { status: judge.status });
+      return json({
+        candidates: [
+          { content: { parts: [{ text: JSON.stringify(judge.indices ?? []) }] } },
+        ],
+      });
+    }
+    if (u.includes('api.cohere.com')) {
+      const cohere = stub.cohere ?? { status: 500 };
+      if (cohere.status !== 200) return new Response('error', { status: cohere.status });
+      const body = JSON.parse(String(init?.body)) as { documents: string[] };
+      const results = body.documents
+        .map((_, i) => ({ index: i, relevance_score: cohere.scores?.[i] ?? 0.001 }))
+        .sort((a, b) => b.relevance_score - a.relevance_score);
+      return json({ results });
+    }
+    throw new Error(`Unexpected fetch in test: ${u}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+// Count the judge (generateContent) calls a fetch mock has served.
+function judgeCallCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes(':generateContent')).length;
+}
+
 type SeedPodcast = {
   title: string;
   category: string;
@@ -75,6 +125,14 @@ beforeEach(() => {
   // neighbor purely for scoring lower than the top match in these tests.
   process.env.GEMINI_SEARCH_MIN_SCORE = '-1';
   process.env.GEMINI_SEARCH_SCORE_MARGIN = '2';
+  // The judge and reranker stages are opt-in via env. Tests enable them
+  // explicitly; they must not leak in from the host env or a previous test.
+  delete process.env.SEARCH_LLM_JUDGE;
+  delete process.env.COHERE_API_KEY;
+  delete process.env.COHERE_RERANK_MIN_SCORE;
+  delete process.env.COHERE_RERANK_TOP_RATIO;
+  delete process.env.COHERE_RERANK_JUNK_TOP;
+  delete process.env.GEMINI_JUDGE_MODEL;
 });
 
 afterEach(() => {
@@ -365,6 +423,133 @@ describe('hybridSearch', () => {
       }
     }
     expect(rejected).toBe(true);
+  });
+});
+
+describe('hybridSearch LLM judge', () => {
+  // Seeded so vector similarity strictly orders Alpha > Beta > Gamma for a
+  // query vector leaning [1, 0.6, 0.3] — deterministic pool order. Titles and
+  // categories share no tokens with the query, so the keyword and category
+  // halves stay empty and the judge pool is exactly the semantic list.
+  const JUDGE_SEEDS: SeedPodcast[] = [
+    { title: 'Alpha Show', category: 'Technology', embedding: axisVector(0) },
+    { title: 'Beta Show', category: 'Business', embedding: axisVector(1) },
+    { title: 'Gamma Show', category: 'Science', embedding: axisVector(2) },
+  ];
+  const judgeQueryVector = () => {
+    const v = axisVector(0);
+    v[1] = 0.6;
+    v[2] = 0.3;
+    return v;
+  };
+
+  test('returns the judge verdict in judge order', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, JUDGE_SEEDS);
+    process.env.SEARCH_LLM_JUDGE = 'true';
+    // Judge keeps Beta (pool index 1) and Alpha (0), most relevant first.
+    stubSearchNetwork({ queryVector: judgeQueryVector(), judge: { status: 200, indices: [1, 0] } });
+
+    const results = await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+    expect(results.map((r) => r.title)).toEqual(['Beta Show', 'Alpha Show']);
+  });
+
+  test('an identical repeat search is served from the verdict cache without a judge call', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, JUDGE_SEEDS);
+    process.env.SEARCH_LLM_JUDGE = 'true';
+    const fetchMock = stubSearchNetwork({
+      queryVector: judgeQueryVector(),
+      judge: { status: 200, indices: [0] },
+    });
+
+    const first = await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+    const second = await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+
+    expect(first.map((r) => r.title)).toEqual(['Alpha Show']);
+    expect(second.map((r) => r.title)).toEqual(['Alpha Show']);
+    expect(judgeCallCount(fetchMock)).toBe(1);
+  });
+
+  test('a changed candidate pool invalidates the cached verdict', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, JUDGE_SEEDS);
+    process.env.SEARCH_LLM_JUDGE = 'true';
+    const fetchMock = stubSearchNetwork({
+      queryVector: judgeQueryVector(),
+      judge: { status: 200, indices: [0] },
+    });
+
+    await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+    // A new ready podcast joins the vector neighbourhood → pool hash changes.
+    await seed(t, [{ title: 'Delta Show', category: 'Health', embedding: axisVector(3) }]);
+    await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+
+    expect(judgeCallCount(fetchMock)).toBe(2);
+  });
+});
+
+describe('hybridSearch degraded mode (judge down → Cohere fallback)', () => {
+  const SEEDS: SeedPodcast[] = [
+    { title: 'Alpha Show', category: 'Technology', embedding: axisVector(0) },
+    { title: 'Beta Show', category: 'Business', embedding: axisVector(1) },
+    { title: 'Gamma Show', category: 'Science', embedding: axisVector(2) },
+  ];
+  const queryVector = () => {
+    const v = axisVector(0);
+    v[1] = 0.6;
+    v[2] = 0.3;
+    return v;
+  };
+
+  test('drops the loosely-related tail below the relative score cutoff', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, SEEDS);
+    process.env.SEARCH_LLM_JUDGE = 'true'; // judge stage active…
+    process.env.COHERE_API_KEY = 'test-cohere-key';
+    // …but rate-limited (429) → falls back to Cohere. Pool order is Alpha,
+    // Beta, Gamma; Gamma's 0.01 sits at 2% of the 0.5 top score — the exact
+    // shape of the live junk tails — and must be dropped by the 25% ratio.
+    stubSearchNetwork({
+      queryVector: queryVector(),
+      judge: { status: 429 },
+      cohere: { status: 200, scores: [0.5, 0.3, 0.01] },
+    });
+
+    const results = await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+    expect(results.map((r) => r.title)).toEqual(['Alpha Show', 'Beta Show']);
+  });
+
+  test('an all-junk score band (top below the junk floor) returns the honest empty state', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, SEEDS);
+    process.env.SEARCH_LLM_JUDGE = 'true';
+    process.env.COHERE_API_KEY = 'test-cohere-key';
+    // No genuine match: every score is junk-level ("cooking recipes" on the
+    // live catalog topped at 0.047). The whole set must be treated as noise.
+    stubSearchNetwork({
+      queryVector: queryVector(),
+      judge: { status: 429 },
+      cohere: { status: 200, scores: [0.04, 0.03, 0.02] },
+    });
+
+    const results = await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+    expect(results).toEqual([]);
+  });
+
+  test('judge AND reranker both down still degrades to RRF results, not an error', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, SEEDS);
+    process.env.SEARCH_LLM_JUDGE = 'true';
+    process.env.COHERE_API_KEY = 'test-cohere-key';
+    stubSearchNetwork({
+      queryVector: queryVector(),
+      judge: { status: 429 },
+      cohere: { status: 500 },
+    });
+
+    const results = await t.action(api.podcasts.hybridSearch, { query: 'entrepreneurship advice' });
+    expect(results.map((r) => r.title)).toEqual(['Alpha Show', 'Beta Show', 'Gamma Show']);
   });
 });
 

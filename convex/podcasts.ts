@@ -1155,11 +1155,31 @@ async function rerankWithCohere(
     const data = (await res.json()) as {
       results: { index: number; relevance_score: number }[]
     }
-    // Optional relevance floor so the reranker ALSO drops genuinely off-topic
-    // candidates (default 0 = keep the reranker's full ordering).
+    if (data.results.length === 0) return []
+
+    // Cohere's ABSOLUTE scores don't calibrate across queries (a sharp query's
+    // best hit ~0.5, a broad one's ~0.06), but WITHIN one query they separate
+    // sharply — measured on the live catalog, true matches sit at 25–100% of
+    // the top score while off-topic tails sit at 3–7%. So filter RELATIVE to
+    // the top score (same top-anchored trick as filterRelevantMatches), which
+    // is calibrated per-query by construction. This matters most when this
+    // stage is the fallback for a rate-limited LLM judge: without it, a dead
+    // judge meant the whole candidate pool came back reordered-but-unfiltered.
+    const results = [...data.results].sort((a, b) => b.relevance_score - a.relevance_score)
+    const topScore = results[0].relevance_score
+
+    // A query with NO genuine match still has a top hit — just a junk one, with
+    // a compressed all-junk score band ("cooking recipes" topped at 0.047 on
+    // live data vs 0.10+ for real matches). Below this absolute top-score
+    // floor, treat the whole set as noise and return the honest empty state.
+    const junkTop = Number(process.env.COHERE_RERANK_JUNK_TOP ?? 0.05)
+    if (topScore < junkTop) return []
+
+    const ratio = Number(process.env.COHERE_RERANK_TOP_RATIO ?? 0.25)
     const floor = Number(process.env.COHERE_RERANK_MIN_SCORE ?? 0)
-    return data.results
-      .filter((r) => r.relevance_score >= floor)
+    const cutoff = Math.max(floor, topScore * ratio)
+    return results
+      .filter((r) => r.relevance_score >= cutoff)
       .map((r) => docs[r.index])
       .filter((d): d is HydratedPodcast => Boolean(d))
   } catch (err) {
@@ -1186,7 +1206,13 @@ async function judgeRelevanceWithGemini(
   docs: HydratedPodcast[],
 ): Promise<HydratedPodcast[] | null> {
   if (docs.length === 0) return null
-  const model = process.env.GEMINI_JUDGE_MODEL ?? 'gemini-2.5-flash'
+  // NOT gemini-2.5-flash: that's the script generator's model, and this key's
+  // free tier caps it at 20 requests/DAY shared across both features — a judge
+  // call per search killed the whole day's quota by mid-morning (measured
+  // 2026-07-10), leaving every later search on the degraded fallback path.
+  // flash-lite has its own per-model daily bucket, so search and generation
+  // no longer starve each other.
+  const model = process.env.GEMINI_JUDGE_MODEL ?? 'gemini-3.1-flash-lite'
   const catalog = docs
     .map(
       (d, i) =>
@@ -1230,7 +1256,11 @@ async function judgeRelevanceWithGemini(
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[]
     }
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+    // Join ALL text parts: thinking-capable models (flash-lite included) may
+    // split the answer across parts or lead with a thought part without text.
+    const text = (data.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? '')
+      .join('')
     if (!text) return null
     const parsed = JSON.parse(text) as unknown
     if (!Array.isArray(parsed)) return null
@@ -1250,6 +1280,40 @@ async function judgeRelevanceWithGemini(
     return null
   }
 }
+
+// The judge call is the scarce resource in search (a metered Gemini request
+// per miss), while the search box re-fires on every keystroke pause and users
+// repeat queries constantly — so verdicts are cached in `searchJudgeCache`.
+// A verdict stays valid while the candidate pool is unchanged (poolHash) and
+// the entry is younger than this TTL; the TTL exists so edited titles or
+// descriptions can't serve a stale verdict for long.
+const JUDGE_CACHE_TTL_MS = 10 * 60 * 1000
+
+export const getJudgeCacheEntry = internalQuery({
+  args: { key: v.string() },
+  handler: (ctx, { key }) =>
+    ctx.db
+      .query('searchJudgeCache')
+      .withIndex('by_key', (q) => q.eq('key', key))
+      .unique(),
+})
+
+// Upsert by key: one row per distinct (query, category), overwritten in place,
+// so the cache never grows past the set of distinct queries actually searched.
+export const putJudgeCacheEntry = internalMutation({
+  args: { key: v.string(), poolHash: v.string(), ids: v.array(v.string()) },
+  handler: async (ctx, { key, poolHash, ids }) => {
+    const existing = await ctx.db
+      .query('searchJudgeCache')
+      .withIndex('by_key', (q) => q.eq('key', key))
+      .unique()
+    if (existing) {
+      await ctx.db.patch(existing._id, { poolHash, ids, createdAt: Date.now() })
+    } else {
+      await ctx.db.insert('searchJudgeCache', { key, poolHash, ids, createdAt: Date.now() })
+    }
+  },
+})
 
 // Public: HYBRID search — combine a literal KEYWORD search (full-text over
 // titles) with the SEMANTIC vector search, so the box matches both literal
@@ -1350,8 +1414,37 @@ export const hybridSearch = action({
       for (const d of [...keywordResults, ...categoryResults, ...allSemantic]) {
         pool.set(d._id, d)
       }
+
+      // Reuse a cached verdict for this exact query+category as long as the
+      // candidate pool hasn't changed and the entry is fresh — repeats (and
+      // the debounce re-firing as the user types) then cost zero judge calls.
+      const cacheKey = `${trimmed.toLowerCase()}|${category ?? ''}`
+      const poolHash = [...pool.keys()].sort().join(',')
+      const cached = await ctx.runQuery(internal.podcasts.getJudgeCacheEntry, {
+        key: cacheKey,
+      })
+      if (
+        cached &&
+        cached.poolHash === poolHash &&
+        Date.now() - cached.createdAt < JUDGE_CACHE_TTL_MS
+      ) {
+        return cached.ids
+          .map((id) => pool.get(id))
+          .filter((d): d is HydratedPodcast => Boolean(d))
+      }
+
       const judged = await judgeRelevanceWithGemini(apiKey, trimmed, [...pool.values()])
-      if (judged) return judged
+      if (judged) {
+        // Cache empty verdicts too — "nothing relevant" is a real answer and
+        // exactly the kind of query users retype. Failures (null) are NOT
+        // cached, so a rate-limited judge retries on the next search.
+        await ctx.runMutation(internal.podcasts.putJudgeCacheEntry, {
+          key: cacheKey,
+          poolHash,
+          ids: judged.map((d) => d._id),
+        })
+        return judged
+      }
     }
 
     // ── Optional rerank stage ───────────────────────────────────────────────
