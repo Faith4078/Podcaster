@@ -87,11 +87,18 @@ function RowSkeleton() {
   )
 }
 
+// Each hybrid search spends REAL money/quota (a Gemini embedding + an LLM-judge
+// call), so 1–2 character prefixes — never a real intent, just the user typing
+// toward one — must not fire it. Below this length the page stays in browse
+// mode. Trade-off: genuine 2-char queries ("ai") fall back to browsing.
+const MIN_SEARCH_CHARS = 3
+
 function DiscoverPage() {
   const [query, setQuery] = useState('')
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
 
   const trimmed = query.trim()
+  const searchActive = trimmed.length >= MIN_SEARCH_CHARS
 
   // ── Hybrid search ───────────────────────────────────────────────────────────
   // The search box matches BOTH literal title words AND meaning: a cheap
@@ -105,7 +112,7 @@ function DiscoverPage() {
   const [searchError, setSearchError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!trimmed) {
+    if (!searchActive) {
       setSemanticResults(undefined)
       setSearchError(null)
       return
@@ -113,6 +120,10 @@ function DiscoverPage() {
     let cancelled = false
     setSemanticResults(undefined)
     setSearchError(null)
+    // 800ms debounce (was 400): a mid-typing pause at 400ms still fired a full
+    // hybrid search per word, and every one of those burns a metered judge
+    // call. 800ms means the pipeline runs when the user has actually stopped —
+    // and the instant keyword preview below covers the feel in the meantime.
     const timer = setTimeout(async () => {
       try {
         const results = await hybridSearch({
@@ -130,12 +141,22 @@ function DiscoverPage() {
         )
         setSemanticResults(undefined)
       }
-    }, 400)
+    }, 800)
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [trimmed, activeCategory, hybridSearch])
+  }, [trimmed, searchActive, activeCategory, hybridSearch])
+
+  // Two-tier search feel: while the debounced hybrid pipeline (embedding +
+  // judge) is in flight, show the CHEAP reactive keyword matches instantly —
+  // literal title hits appear as the user types, then the judged result set
+  // replaces them when it lands. searchPodcasts is a plain Convex query: no
+  // Gemini call, no rate-limit token, reactive by default.
+  const keywordPreview = useQuery(
+    api.podcasts.searchPodcasts,
+    searchActive ? { query: trimmed, category: activeCategory ?? undefined } : 'skip',
+  )
 
   // Latest is always loaded: it's the idle browse AND the graceful fallback when
   // the Gemini-backed search errors, so the box is never left blank.
@@ -147,10 +168,19 @@ function DiscoverPage() {
         ? (latest as Podcast[]).filter((p) => p.category === activeCategory)
         : (latest as Podcast[])
 
-  // Browse Latest when idle; fall back to Latest on a search error; otherwise
-  // show the semantic (intent) results (undefined while the embedding is in
-  // flight → skeletons).
-  const podcasts = !trimmed ? latestFiltered : searchError ? latestFiltered : semanticResults
+  // Browse Latest when idle or below the min search length; fall back to
+  // Latest on a search error; while the hybrid pipeline is in flight show the
+  // instant keyword preview (or skeletons if it has nothing yet); once the
+  // judged results land, show those.
+  const isSearch = searchActive && !searchError
+  const searchPending = isSearch && semanticResults === undefined
+  const podcasts = !isSearch
+    ? latestFiltered
+    : searchPending
+      ? keywordPreview && keywordPreview.length > 0
+        ? (keywordPreview as Podcast[])
+        : undefined
+      : semanticResults
 
   // ── Top matches vs Related ──────────────────────────────────────────────────
   // The reranker orders results well (best first) but CANNOT reliably *drop* the
@@ -158,11 +188,12 @@ function DiscoverPage() {
   // no fixed cutoff separates "stocks" from "expectant mothers" noise. Rather
   // than fake a threshold, we present the ranking honestly — the first few hits
   // as "Top matches", the ordered tail as a dimmed "Related" section — so a
-  // low-ranked result stops masquerading as a claimed answer. Search-only; idle
-  // browse and the error-fallback keep the single grid.
+  // low-ranked result stops masquerading as a claimed answer. Settled search
+  // results only; browse, the error-fallback, and the in-flight keyword
+  // preview keep the single grid.
   const TOP_N = 4
-  const isSearch = Boolean(trimmed) && !searchError
-  const showSplit = isSearch && podcasts !== undefined && podcasts.length > TOP_N
+  const showSplit =
+    isSearch && !searchPending && podcasts !== undefined && podcasts.length > TOP_N
   const topMatches = showSplit ? podcasts!.slice(0, TOP_N) : (podcasts ?? [])
   const related = showSplit ? podcasts!.slice(TOP_N) : []
 
@@ -193,7 +224,7 @@ function DiscoverPage() {
       </div>
 
       {/* Search-error notice (results fall back to Latest below) */}
-      {trimmed && searchError ? (
+      {searchActive && searchError ? (
         <p className="mb-4 text-[#f97535] text-xs">{searchError}</p>
       ) : null}
 
@@ -204,7 +235,7 @@ function DiscoverPage() {
         </div>
       ) : podcasts.length === 0 ? (
         <p className="text-[#71788B] text-sm">
-          {trimmed && !searchError
+          {isSearch
             ? 'No strong matches for that idea — try describing it differently.'
             : 'No podcasts yet — create the first one!'}
         </p>
