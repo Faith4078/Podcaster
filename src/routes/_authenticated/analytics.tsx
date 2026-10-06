@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from 'convex/react'
 import { Bookmark, Download, Headphones, Mic, Plus, Rss } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { api } from '../../../convex/_generated/api'
 import RssFeedCard from '../../components/RssFeedCard'
 
@@ -98,8 +98,34 @@ function ActivityChart({ series }: { series: Point[] }) {
   )
 }
 
+// Current UTC day (YYYY-MM-DD), kept fresh: it ticks over at UTC midnight and when
+// the tab becomes visible again, so the page's date windows roll forward without
+// a manual refresh. Passing it to the query is what makes the query re-run.
+function useUtcDay() {
+  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10))
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+    const sync = () => {
+      setDay(new Date().toISOString().slice(0, 10))
+      const now = Date.now()
+      const nextMidnight = Math.floor(now / 86_400_000 + 1) * 86_400_000
+      clearTimeout(timer)
+      timer = setTimeout(sync, nextMidnight - now + 1000)
+    }
+    sync()
+    const onVisible = () => document.visibilityState === 'visible' && sync()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+  return day
+}
+
 function AnalyticsPage() {
-  const data = useQuery(api.analytics.myOverview, { days: 30 })
+  const today = useUtcDay()
+  const data = useQuery(api.analytics.myOverview, { days: 30, today })
 
   if (data === undefined) {
     return (

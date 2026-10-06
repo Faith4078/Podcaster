@@ -24,8 +24,15 @@ export function lastDays(now: number, days: number): string[] {
 // per-episode index reads below stay small. Time series use range scans on the
 // implicit _creationTime suffix of the by_podcast indexes.
 export const myOverview = query({
-  args: { days: v.optional(v.number()) },
-  handler: async (ctx, { days: requestedDays }) => {
+  args: {
+    days: v.optional(v.number()),
+    // The viewer's current UTC day (YYYY-MM-DD). A query only re-runs when its
+    // data or arguments change, so without this a quiet account would keep
+    // showing yesterday's window after midnight. The page updates it at UTC
+    // midnight, which re-runs the query.
+    today: v.optional(v.string()),
+  },
+  handler: async (ctx, { days: requestedDays, today }) => {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) return null
     const user = await ctx.db
@@ -35,7 +42,11 @@ export const myOverview = query({
     if (!user) return null
 
     const days = Math.min(Math.max(Math.floor(requestedDays ?? 30), 1), 90)
-    const now = Date.now()
+    // Anchor the window on the viewer's day, but only trust it within two days of
+    // the server clock so a wrong device clock can't hide recent activity.
+    const serverNow = Date.now()
+    const claimed = today && /^\d{4}-\d{2}-\d{2}$/.test(today) ? Date.parse(`${today}T23:59:59.999Z`) : NaN
+    const now = Math.abs(claimed - serverNow) <= 2 * DAY_MS ? claimed : serverNow
     const keys = lastDays(now, days)
     const since = new Date(`${keys[0]}T00:00:00.000Z`).getTime()
 

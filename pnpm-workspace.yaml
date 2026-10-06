@@ -1,0 +1,8 @@
+allowBuilds:
+  esbuild: true
+  lightningcss: true
+minimumReleaseAgeExclude:
+  - '@clerk/backend@3.8.1'
+  - '@clerk/react@6.10.3'
+  - '@clerk/shared@4.19.1'
+  - '@clerk/tanstack-react-start@1.4.6'

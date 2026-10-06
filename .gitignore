@@ -20,8 +20,3 @@ todos.json
 docs/writeups
 docs/billing
 docs/search
-
-
-# npm-only project — do not commit pnpm artifacts
-pnpm-lock.yaml
-pnpm-workspace.yaml

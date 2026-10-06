@@ -437,6 +437,22 @@ describe('creator analytics', () => {
     )
   })
 
+  test('the window follows the viewer day, but ignores a wildly wrong clock', async () => {
+    const t = convexTest(schema, modules)
+    await seedUser(t)
+    const asMe = t.withIdentity({ subject: 'user_1' })
+    const day = (offsetDays: number) =>
+      new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10)
+
+    // Viewer is already in tomorrow (UTC midnight just passed for them).
+    const ahead = await asMe.query(api.analytics.myOverview, { days: 3, today: day(1) })
+    expect(ahead?.series.map((p) => p.date)).toEqual([day(-1), day(0), day(1)])
+
+    // A clock a year off falls back to the server's day.
+    const bogus = await asMe.query(api.analytics.myOverview, { days: 3, today: '2020-01-01' })
+    expect(bogus?.series[2].date).toBe(day(0))
+  })
+
   test('the requested window is clamped to 1..90 days', async () => {
     const t = convexTest(schema, modules)
     await seedUser(t)
