@@ -42,7 +42,21 @@ export default defineSchema({
   listens: defineTable({
     podcastId: v.id('podcasts'),
     userId: v.id('users'),
-  }).index('by_podcast_user', ['podcastId', 'userId']),
+  })
+    .index('by_podcast_user', ['podcastId', 'userId'])
+    // Range-scan a podcast's listens by time (_creationTime is appended
+    // implicitly) — powers the creator analytics time series.
+    .index('by_podcast', ['podcastId']),
+
+  // One row per fetch of an episode's audio through the RSS enclosure redirect
+  // (GET /audio/<podcastId>.wav). Podcast apps download the enclosure directly,
+  // so routing it through Convex is the only way to count feed downloads.
+  rssDownloads: defineTable({
+    podcastId: v.id('podcasts'),
+    authorId: v.id('users'),
+  })
+    .index('by_podcast', ['podcastId'])
+    .index('by_author', ['authorId']),
 
   // A user's named bookmark collections. Every bookmark belongs to exactly one
   // folder. `by_user` lists a user's folders; `by_user_name` dedups folder names
@@ -74,7 +88,8 @@ export default defineSchema({
   })
     .index('by_user', ['userId'])
     .index('by_user_podcast', ['userId', 'podcastId'])
-    .index('by_user_folder', ['userId', 'folderId']),
+    .index('by_user_folder', ['userId', 'folderId'])
+    .index('by_podcast', ['podcastId']),
 
   // One row per (user, podcast) the user has downloaded. Deduped per podcast so
   // re-downloading the same episode is free; the Free-tier cap counts DISTINCT
@@ -86,7 +101,8 @@ export default defineSchema({
     podcastId: v.id('podcasts'),
   })
     .index('by_user', ['userId'])
-    .index('by_user_podcast', ['userId', 'podcastId']),
+    .index('by_user_podcast', ['userId', 'podcastId'])
+    .index('by_podcast', ['podcastId']),
 
   podcasts: defineTable({
     // Core metadata
@@ -114,6 +130,9 @@ export default defineSchema({
     status: v.union(
       v.literal('pending'),
       v.literal('generating'),
+      // Script written, audio NOT yet generated — waiting for the author to
+      // review/edit the transcript and approve audio generation.
+      v.literal('script_review'),
       v.literal('ready'),
       v.literal('failed')
     ),

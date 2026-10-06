@@ -1,12 +1,23 @@
 import { useUser } from '@clerk/tanstack-react-start'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useAction, useMutation, useQuery } from 'convex/react'
-import { AlertCircle, BarChart3, Crown, Edit2, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  AlertCircle,
+  BarChart3,
+  Crown,
+  Edit2,
+  FileText,
+  Loader2,
+  Play,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../convex/_generated/api'
 import type { Id } from '../../convex/_generated/dataModel'
 import BookmarkButton from '../components/BookmarkButton'
+import ScriptEditor from '../components/ScriptEditor'
 import { usePlayerStore } from '../store/playerStore'
 
 export const Route = createFileRoute('/podcast/$id')({ component: PodcastDetailPage })
@@ -93,6 +104,7 @@ function PodcastDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRegeneratingThumbnail, setIsRegeneratingThumbnail] = useState(false)
+  const [editingScript, setEditingScript] = useState(false)
 
   const podcast = useQuery(api.podcasts.getById, { id: id as Id<'podcasts'> })
   const convexUser = useQuery(api.users.getByClerkId, user ? { clerkId: user.id } : 'skip')
@@ -152,7 +164,7 @@ function PodcastDetailPage() {
     setIsDeleting(true)
     try {
       await deletePodcast({ id: id as Id<'podcasts'>, authorId: convexUser._id })
-      navigate({ to: '/' })
+      navigate({ to: '/dashboard' })
     } catch {
       setIsDeleting(false)
       setShowDeleteConfirm(false)
@@ -181,6 +193,29 @@ function PodcastDetailPage() {
   const authorName = author?.name ?? 'Unknown'
   const authorImage = author?.imageUrl ?? null
 
+  // ── Script review ────────────────────────────────────────────────────────
+  // The script is written but no audio exists yet. Only the author can edit and
+  // approve it; everyone else just sees that the episode isn't published yet.
+  if (podcast.status === 'script_review') {
+    if (isOwner) {
+      return (
+        <ScriptEditor
+          key={podcast._id}
+          podcastId={podcast._id}
+          title={podcast.title}
+          initialScript={podcast.transcript ?? ''}
+        />
+      )
+    }
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-[#71788B]">
+        <AlertCircle size={32} />
+        <p className="text-base font-bold text-white">This episode isn't published yet</p>
+        <p className="text-sm">The author is still reviewing the script.</p>
+      </div>
+    )
+  }
+
   // ── Generating / Pending ─────────────────────────────────────────────────
   if (podcast.status === 'pending' || podcast.status === 'generating') {
     return (
@@ -195,8 +230,11 @@ function PodcastDetailPage() {
           <div className="flex flex-col gap-4 text-left">
             {(['generating_script', 'generating_audio', 'generating_thumbnail'] as const).map(
               (step, i) => {
-                const isDone = podcast.status === 'ready'
-                const isCurrent = podcast.status === 'generating' && i === 0
+                // A saved transcript means the script step is finished (e.g. the
+                // author just approved it), so audio is the step in progress.
+                const currentIdx = podcast.transcript ? 1 : 0
+                const isDone = podcast.status === 'ready' || i < currentIdx
+                const isCurrent = podcast.status === 'generating' && i === currentIdx
                 return (
                   <div key={step} className="flex items-center gap-3">
                     {isDone ? (
@@ -421,6 +459,17 @@ function PodcastDetailPage() {
                     Edit
                   </Link>
 
+                  {podcast.transcript && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingScript(true)}
+                      className="flex items-center gap-2 rounded-md border border-[#252525] bg-[#15171C] px-5 py-[14px] text-base font-bold text-white hover:border-[#f97535]/40 transition-colors"
+                    >
+                      <FileText size={15} />
+                      Edit script
+                    </button>
+                  )}
+
                   {showDeleteConfirm ? (
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-[#71788B]">Delete this podcast?</span>
@@ -456,8 +505,22 @@ function PodcastDetailPage() {
           </div>
         </div>
 
+        {/* Script editor (owner) replaces the read-only transcript while open */}
+        {isOwner && editingScript && podcast.transcript && (
+          <section>
+            <h2 className="text-xl font-bold text-white mb-4">Edit script</h2>
+            <ScriptEditor
+              mode="edit"
+              podcastId={podcast._id}
+              title={podcast.title}
+              initialScript={podcast.transcript}
+              onClose={() => setEditingScript(false)}
+            />
+          </section>
+        )}
+
         {/* Transcript */}
-        {transcriptParas.length > 0 && (
+        {!(isOwner && editingScript) && transcriptParas.length > 0 && (
           <section>
             <h2 className="text-xl font-bold text-white mb-5">Transcript</h2>
             <div className="rounded-xl bg-[#15171C] border border-[#252525] px-6 py-5 flex flex-col gap-4">

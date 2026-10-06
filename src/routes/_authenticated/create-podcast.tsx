@@ -151,8 +151,10 @@ function CreatePodcastPage() {
       }
 
       // Fire generation in background — detail page shows live status via Convex reactivity
-      await generatePodcast({ podcastId: id })
-      toast.success('Your podcast is generating — this can take a moment.')
+      // reviewScript: write the script only, then let the author edit it before
+      // any audio is generated (see ScriptEditor on the podcast page).
+      await generatePodcast({ podcastId: id, reviewScript: true })
+      toast.success('Writing your script — you can review and edit it before audio is made.')
       navigate({ to: '/podcast/$id', params: { id } })
     } catch (err) {
       // Defensive: surface the upgrade wall instead of a raw error on a quota race.
@@ -390,7 +392,7 @@ function CreatePodcastPage() {
             className="self-start flex items-center gap-2 rounded-md bg-[#f97535] px-[22px] py-[14px] text-base font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting && <Loader2 size={16} className="animate-spin" />}
-            {submitting ? 'Creating…' : 'Publish Podcast'}
+            {submitting ? 'Creating…' : 'Write Script'}
           </button>
         )}
       </div>

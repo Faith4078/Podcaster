@@ -17,14 +17,18 @@ import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SignUpIndexRouteImport } from './routes/sign-up/index'
 import { Route as SignInIndexRouteImport } from './routes/sign-in/index'
+import { Route as BlogIndexRouteImport } from './routes/blog/index'
 import { Route as SignUpSsoCallbackRouteImport } from './routes/sign-up/sso-callback'
 import { Route as SignInSsoCallbackRouteImport } from './routes/sign-in/sso-callback'
 import { Route as PodcastIdRouteImport } from './routes/podcast.$id'
 import { Route as EditIdRouteImport } from './routes/edit.$id'
 import { Route as DemoQueryRouteImport } from './routes/demo/query'
 import { Route as DemoClerkRouteImport } from './routes/demo/clerk'
+import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
 import { Route as AuthenticatedMyProfileRouteImport } from './routes/_authenticated/my-profile'
+import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCreatePodcastRouteImport } from './routes/_authenticated/create-podcast'
+import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 
 const DiscoverRoute = DiscoverRouteImport.update({
   id: '/discover',
@@ -65,6 +69,11 @@ const SignInIndexRoute = SignInIndexRouteImport.update({
   path: '/sign-in/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BlogIndexRoute = BlogIndexRouteImport.update({
+  id: '/blog/',
+  path: '/blog/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignUpSsoCallbackRoute = SignUpSsoCallbackRouteImport.update({
   id: '/sign-up/sso-callback',
   path: '/sign-up/sso-callback',
@@ -95,9 +104,19 @@ const DemoClerkRoute = DemoClerkRouteImport.update({
   path: '/demo/clerk',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BlogSlugRoute = BlogSlugRouteImport.update({
+  id: '/blog/$slug',
+  path: '/blog/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedMyProfileRoute = AuthenticatedMyProfileRouteImport.update({
   id: '/my-profile',
   path: '/my-profile',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedCreatePodcastRoute =
@@ -106,6 +125,11 @@ const AuthenticatedCreatePodcastRoute =
     path: '/create-podcast',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -113,14 +137,18 @@ export interface FileRoutesByFullPath {
   '/billing': typeof BillingRoute
   '/bookmarks': typeof BookmarksRoute
   '/discover': typeof DiscoverRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
   '/create-podcast': typeof AuthenticatedCreatePodcastRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
   '/my-profile': typeof AuthenticatedMyProfileRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
   '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
   '/sign-up/sso-callback': typeof SignUpSsoCallbackRoute
+  '/blog/': typeof BlogIndexRoute
   '/sign-in/': typeof SignInIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
 }
@@ -130,14 +158,18 @@ export interface FileRoutesByTo {
   '/billing': typeof BillingRoute
   '/bookmarks': typeof BookmarksRoute
   '/discover': typeof DiscoverRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
   '/create-podcast': typeof AuthenticatedCreatePodcastRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
   '/my-profile': typeof AuthenticatedMyProfileRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
   '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
   '/sign-up/sso-callback': typeof SignUpSsoCallbackRoute
+  '/blog': typeof BlogIndexRoute
   '/sign-in': typeof SignInIndexRoute
   '/sign-up': typeof SignUpIndexRoute
 }
@@ -149,14 +181,18 @@ export interface FileRoutesById {
   '/billing': typeof BillingRoute
   '/bookmarks': typeof BookmarksRoute
   '/discover': typeof DiscoverRoute
+  '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/create-podcast': typeof AuthenticatedCreatePodcastRoute
+  '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/my-profile': typeof AuthenticatedMyProfileRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/demo/clerk': typeof DemoClerkRoute
   '/demo/query': typeof DemoQueryRoute
   '/edit/$id': typeof EditIdRoute
   '/podcast/$id': typeof PodcastIdRoute
   '/sign-in/sso-callback': typeof SignInSsoCallbackRoute
   '/sign-up/sso-callback': typeof SignUpSsoCallbackRoute
+  '/blog/': typeof BlogIndexRoute
   '/sign-in/': typeof SignInIndexRoute
   '/sign-up/': typeof SignUpIndexRoute
 }
@@ -168,14 +204,18 @@ export interface FileRouteTypes {
     | '/billing'
     | '/bookmarks'
     | '/discover'
+    | '/analytics'
     | '/create-podcast'
+    | '/dashboard'
     | '/my-profile'
+    | '/blog/$slug'
     | '/demo/clerk'
     | '/demo/query'
     | '/edit/$id'
     | '/podcast/$id'
     | '/sign-in/sso-callback'
     | '/sign-up/sso-callback'
+    | '/blog/'
     | '/sign-in/'
     | '/sign-up/'
   fileRoutesByTo: FileRoutesByTo
@@ -185,14 +225,18 @@ export interface FileRouteTypes {
     | '/billing'
     | '/bookmarks'
     | '/discover'
+    | '/analytics'
     | '/create-podcast'
+    | '/dashboard'
     | '/my-profile'
+    | '/blog/$slug'
     | '/demo/clerk'
     | '/demo/query'
     | '/edit/$id'
     | '/podcast/$id'
     | '/sign-in/sso-callback'
     | '/sign-up/sso-callback'
+    | '/blog'
     | '/sign-in'
     | '/sign-up'
   id:
@@ -203,14 +247,18 @@ export interface FileRouteTypes {
     | '/billing'
     | '/bookmarks'
     | '/discover'
+    | '/_authenticated/analytics'
     | '/_authenticated/create-podcast'
+    | '/_authenticated/dashboard'
     | '/_authenticated/my-profile'
+    | '/blog/$slug'
     | '/demo/clerk'
     | '/demo/query'
     | '/edit/$id'
     | '/podcast/$id'
     | '/sign-in/sso-callback'
     | '/sign-up/sso-callback'
+    | '/blog/'
     | '/sign-in/'
     | '/sign-up/'
   fileRoutesById: FileRoutesById
@@ -222,12 +270,14 @@ export interface RootRouteChildren {
   BillingRoute: typeof BillingRoute
   BookmarksRoute: typeof BookmarksRoute
   DiscoverRoute: typeof DiscoverRoute
+  BlogSlugRoute: typeof BlogSlugRoute
   DemoClerkRoute: typeof DemoClerkRoute
   DemoQueryRoute: typeof DemoQueryRoute
   EditIdRoute: typeof EditIdRoute
   PodcastIdRoute: typeof PodcastIdRoute
   SignInSsoCallbackRoute: typeof SignInSsoCallbackRoute
   SignUpSsoCallbackRoute: typeof SignUpSsoCallbackRoute
+  BlogIndexRoute: typeof BlogIndexRoute
   SignInIndexRoute: typeof SignInIndexRoute
   SignUpIndexRoute: typeof SignUpIndexRoute
 }
@@ -290,6 +340,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignInIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/blog/': {
+      id: '/blog/'
+      path: '/blog'
+      fullPath: '/blog/'
+      preLoaderRoute: typeof BlogIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-up/sso-callback': {
       id: '/sign-up/sso-callback'
       path: '/sign-up/sso-callback'
@@ -332,11 +389,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DemoClerkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/blog/$slug': {
+      id: '/blog/$slug'
+      path: '/blog/$slug'
+      fullPath: '/blog/$slug'
+      preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/my-profile': {
       id: '/_authenticated/my-profile'
       path: '/my-profile'
       fullPath: '/my-profile'
       preLoaderRoute: typeof AuthenticatedMyProfileRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/dashboard': {
+      id: '/_authenticated/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/create-podcast': {
@@ -346,16 +417,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCreatePodcastRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/analytics': {
+      id: '/_authenticated/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedCreatePodcastRoute: typeof AuthenticatedCreatePodcastRoute
+  AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedMyProfileRoute: typeof AuthenticatedMyProfileRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
   AuthenticatedCreatePodcastRoute: AuthenticatedCreatePodcastRoute,
+  AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedMyProfileRoute: AuthenticatedMyProfileRoute,
 }
 
@@ -370,12 +452,14 @@ const rootRouteChildren: RootRouteChildren = {
   BillingRoute: BillingRoute,
   BookmarksRoute: BookmarksRoute,
   DiscoverRoute: DiscoverRoute,
+  BlogSlugRoute: BlogSlugRoute,
   DemoClerkRoute: DemoClerkRoute,
   DemoQueryRoute: DemoQueryRoute,
   EditIdRoute: EditIdRoute,
   PodcastIdRoute: PodcastIdRoute,
   SignInSsoCallbackRoute: SignInSsoCallbackRoute,
   SignUpSsoCallbackRoute: SignUpSsoCallbackRoute,
+  BlogIndexRoute: BlogIndexRoute,
   SignInIndexRoute: SignInIndexRoute,
   SignUpIndexRoute: SignUpIndexRoute,
 }

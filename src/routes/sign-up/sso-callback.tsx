@@ -8,8 +8,8 @@ export const Route = createFileRoute('/sign-up/sso-callback')({
 function SSOCallback() {
   return (
     <AuthenticateWithRedirectCallback
-      signInFallbackRedirectUrl="/"
-      signUpFallbackRedirectUrl="/"
+      signInFallbackRedirectUrl="/dashboard"
+      signUpFallbackRedirectUrl="/dashboard"
     />
   );
 }

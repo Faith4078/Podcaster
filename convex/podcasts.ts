@@ -20,6 +20,10 @@ export const FREE_GENERATION_LIMIT = 3
 // gate (generatePodcast) keys off this number.
 export const PRO_GENERATION_LIMIT = 7
 
+// The TTS step only voices the first 8000 characters of a transcript, so the
+// script editor refuses anything longer rather than silently truncating audio.
+export const MAX_SCRIPT_CHARS = 8000
+
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 // A podcast with media URLs resolved and its author joined — the shape returned
@@ -386,7 +390,12 @@ export const editAndRegenerate = action({
 export const setPipelineStatus = internalMutation({
   args: {
     id: v.id('podcasts'),
-    status: v.union(v.literal('generating'), v.literal('ready'), v.literal('failed')),
+    status: v.union(
+      v.literal('generating'),
+      v.literal('script_review'),
+      v.literal('ready'),
+      v.literal('failed'),
+    ),
     failedStep: v.optional(v.string()),
     errorMsg: v.optional(v.string()),
   },
@@ -776,8 +785,14 @@ function requeueDelayMs(attempt: number): number {
 // Internal: the actual generation pipeline. `attempt` counts scheduler-based
 // requeues after rate-limit failures (0 = first run).
 export const runPipeline = internalAction({
-  args: { podcastId: v.id('podcasts'), attempt: v.optional(v.number()) },
-  handler: async (ctx, { podcastId, attempt = 0 }) => {
+  args: {
+    podcastId: v.id('podcasts'),
+    attempt: v.optional(v.number()),
+    // Stop after the script is written and park the podcast in 'script_review'
+    // so the author can edit it before any audio (the expensive step) is made.
+    reviewScript: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { podcastId, attempt = 0, reviewScript = false }) => {
     // On a rate-limit failure: requeue (status stays 'generating' — the detail
     // page keeps showing live progress) until the cap, then fail with the
     // existing friendly message.
@@ -790,6 +805,7 @@ export const runPipeline = internalAction({
         await ctx.scheduler.runAfter(delayMs, internal.podcasts.runPipeline, {
           podcastId,
           attempt: attempt + 1,
+          reviewScript,
         })
         return
       }
@@ -831,6 +847,7 @@ export const runPipeline = internalAction({
     // prompt. Skipping the call means a requeue after an audio-step rate limit
     // doesn't burn another script generation.
     let transcript: string
+    let scriptGenerated = false
     if (podcast.transcript) {
       transcript = podcast.transcript
     } else try {
@@ -860,9 +877,20 @@ Write the script now:`
         id: podcastId,
         transcript,
       })
+      scriptGenerated = true
     } catch (err) {
       console.error('Script generation failed:', String(err))
       await failOrRequeue(err, 'generating_script', 'Script generation')
+      return
+    }
+
+    // Review gate: a freshly written script waits for the author's approval
+    // (approveScript re-runs the pipeline, which reuses the saved transcript).
+    if (reviewScript && scriptGenerated) {
+      await ctx.runMutation(internal.podcasts.setPipelineStatus, {
+        id: podcastId,
+        status: 'script_review',
+      })
       return
     }
 
@@ -911,6 +939,10 @@ Write the script now:`
             audioStorageId,
           })
           audioSaved = true
+          // Re-voicing replaces the old file; delete it so storage doesn't pile up.
+          if (podcast.audioStorageId && podcast.audioStorageId !== audioStorageId) {
+            await ctx.storage.delete(podcast.audioStorageId).catch(() => {})
+          }
         } else {
           audioError = 'Convex storage did not persist the audio file.'
         }
@@ -940,10 +972,15 @@ Write the script now:`
     }
 
     // ── Step 4: Thumbnail generation ─────────────────────────────────────────
-    try {
-      await storeThumbnailForPodcast(ctx, podcastId, podcast)
-    } catch (err) {
-      console.error('Thumbnail generation failed (non-fatal):', String(err))
+    // Only when there is no cover yet. A re-run for an existing podcast (script
+    // edited, audio regenerated) must not replace its art, least of all a Pro
+    // user's uploaded image. Edits that need new art clear the thumbnail first.
+    if (!podcast.thumbnailUrl) {
+      try {
+        await storeThumbnailForPodcast(ctx, podcastId, podcast)
+      } catch (err) {
+        console.error('Thumbnail generation failed (non-fatal):', String(err))
+      }
     }
 
     // Single point where status flips to 'ready' — also charges the quota slot
@@ -956,8 +993,8 @@ Write the script now:`
 // Gates users at their plan's lifetime successful-generation limit:
 // FREE_GENERATION_LIMIT for Free, PRO_GENERATION_LIMIT for Pro.
 export const generatePodcast = action({
-  args: { podcastId: v.id('podcasts') },
-  handler: async (ctx, { podcastId }) => {
+  args: { podcastId: v.id('podcasts'), reviewScript: v.optional(v.boolean()) },
+  handler: async (ctx, { podcastId, reviewScript }) => {
     // Resolve the user from the authenticated identity (NOT a client-supplied
     // authorId) so the gate can't be bypassed by spoofing an author.
     const identity = await ctx.auth.getUserIdentity()
@@ -985,7 +1022,109 @@ export const generatePodcast = action({
     // pipeline (transcript → audio → thumbnail) can take minutes; awaiting it
     // here would block the client and blow the 600s action cap. The detail page
     // renders live status (pending → generating → ready/failed) via reactivity.
+    await ctx.scheduler.runAfter(0, internal.podcasts.runPipeline, { podcastId, reviewScript })
+  },
+})
+
+// ─── Script review (edit the transcript before audio is generated) ──────────
+
+// Resolve the signed-in user and confirm they own the podcast. Used by every
+// script-review function so the server, not the client, decides who may edit.
+async function requireOwner(
+  ctx: QueryCtx,
+  podcastId: Id<'podcasts'>,
+): Promise<{ user: Doc<'users'>; podcast: Doc<'podcasts'> }> {
+  const identity = await ctx.auth.getUserIdentity()
+  if (!identity) throw new ConvexError({ code: 'UNAUTHENTICATED' })
+  const user = await ctx.db
+    .query('users')
+    .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
+    .unique()
+  if (!user) throw new ConvexError({ code: 'UNAUTHENTICATED' })
+  const podcast = await ctx.db.get(podcastId)
+  if (!podcast) throw new ConvexError({ code: 'NOT_FOUND' })
+  if (podcast.authorId !== user._id) throw new ConvexError({ code: 'FORBIDDEN' })
+  return { user, podcast }
+}
+
+// Public: save the author's edits to the script, either while it awaits review
+// or on an already published podcast ("update text only": the audio is NOT
+// re-made, so it can drift from the text until the author regenerates it).
+// Saves are cheap (no Gemini), so the editor can call this freely. Not allowed
+// mid generation, which would race the pipeline.
+export const saveScript = mutation({
+  args: { podcastId: v.id('podcasts'), transcript: v.string() },
+  handler: async (ctx, { podcastId, transcript }) => {
+    const { podcast } = await requireOwner(ctx, podcastId)
+    if (podcast.status !== 'script_review' && podcast.status !== 'ready') {
+      throw new ConvexError({ code: 'NOT_EDITABLE' })
+    }
+    const cleaned = transcript.trim()
+    if (!cleaned) throw new ConvexError({ code: 'SCRIPT_EMPTY' })
+    if (cleaned.length > MAX_SCRIPT_CHARS) {
+      throw new ConvexError({ code: 'SCRIPT_TOO_LONG', max: MAX_SCRIPT_CHARS })
+    }
+    await ctx.db.patch(podcastId, { transcript: cleaned })
+  },
+})
+
+// Public: approve the (edited) script and generate audio from it. The pipeline
+// reuses the stored transcript (step 1 is skipped), so this spends only the
+// TTS / embedding / thumbnail calls.
+export const approveScript = action({
+  args: { podcastId: v.id('podcasts'), transcript: v.string() },
+  handler: async (ctx, { podcastId, transcript }) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new ConvexError({ code: 'UNAUTHENTICATED' })
+    const user = await ctx.runQuery(api.users.getByClerkId, { clerkId: identity.subject })
+    if (!user) throw new ConvexError({ code: 'UNAUTHENTICATED' })
+
+    // Quota is charged when a podcast first reaches 'ready', so re-check here:
+    // several drafts can sit in review at once and must not all slip past the
+    // cap. A podcast that already used its slot (re-voicing a published episode)
+    // costs no new one.
+    const existing = await ctx.runQuery(api.podcasts.getById, { id: podcastId })
+    const generationLimit = user.plan === 'pro' ? PRO_GENERATION_LIMIT : FREE_GENERATION_LIMIT
+    if (!existing?.countedTowardQuota && (user.generationCount ?? 0) >= generationLimit) {
+      throw new ConvexError({ code: 'QUOTA_EXCEEDED' })
+    }
+
+    // Persist the final text first (also enforces ownership + editable status).
+    await ctx.runMutation(api.podcasts.saveScript, { podcastId, transcript })
+    await ctx.runMutation(internal.rateLimit.consumeGenerationToken, {})
+
+    await ctx.runMutation(internal.podcasts.setPipelineStatus, {
+      id: podcastId,
+      status: 'generating',
+    })
     await ctx.scheduler.runAfter(0, internal.podcasts.runPipeline, { podcastId })
+  },
+})
+
+// Public (owner-only): drop the current script and flip back to 'generating'.
+// Called by regenerateScript.
+export const resetScript = mutation({
+  args: { podcastId: v.id('podcasts') },
+  handler: async (ctx, { podcastId }) => {
+    const { podcast } = await requireOwner(ctx, podcastId)
+    if (podcast.status !== 'script_review') {
+      throw new ConvexError({ code: 'NOT_IN_REVIEW' })
+    }
+    await ctx.db.patch(podcastId, { transcript: undefined, status: 'generating' })
+  },
+})
+
+// Public: throw away the draft and have the AI write a fresh script (returns to
+// review afterwards). Costs one script generation, so it takes a rate-limit token.
+export const regenerateScript = action({
+  args: { podcastId: v.id('podcasts') },
+  handler: async (ctx, { podcastId }) => {
+    await ctx.runMutation(internal.rateLimit.consumeGenerationToken, {})
+    await ctx.runMutation(api.podcasts.resetScript, { podcastId })
+    await ctx.scheduler.runAfter(0, internal.podcasts.runPipeline, {
+      podcastId,
+      reviewScript: true,
+    })
   },
 })
 
@@ -1007,13 +1146,18 @@ export const retryGeneration = action({
     // Global throughput throttle — throws RATE_LIMITED when the bucket is empty.
     await ctx.runMutation(internal.rateLimit.consumeGenerationToken, {})
 
+    // A failed SCRIPT step means no transcript exists yet, so keep the review
+    // gate; a failure after the script (audio...) reuses the saved transcript.
+    const podcast = await ctx.runQuery(api.podcasts.getById, { id: podcastId })
+    const reviewScript = podcast?.failedStep === 'generating_script' ? true : undefined
+
     // Reset to pending so the pipeline re-runs cleanly
     await ctx.runMutation(internal.podcasts.setPipelineStatus, {
       id: podcastId,
       status: 'generating',
     })
     // Background (scheduled) — see generatePodcast for rationale.
-    await ctx.scheduler.runAfter(0, internal.podcasts.runPipeline, { podcastId })
+    await ctx.scheduler.runAfter(0, internal.podcasts.runPipeline, { podcastId, reviewScript })
   },
 })
 

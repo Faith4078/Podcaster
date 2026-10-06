@@ -91,13 +91,22 @@ function MyProfilePage() {
                 {myPodcasts?.length ?? 0}
               </span>
             </div>
-            <Link
-              to="/create-podcast"
-              className="flex items-center gap-1.5 text-base font-semibold text-[#fff] hover:text-[#f97535]/80 transition-colors"
-            >
-              <Plus size={14} />
-              New Podcast
-            </Link>
+            <div className="flex items-center gap-5">
+              <Link
+                to="/analytics"
+                className="flex items-center gap-1.5 text-base font-semibold text-[#fff] hover:text-[#f97535]/80 transition-colors"
+              >
+                <BarChart3 size={14} />
+                Analytics &amp; RSS
+              </Link>
+              <Link
+                to="/create-podcast"
+                className="flex items-center gap-1.5 text-base font-semibold text-[#fff] hover:text-[#f97535]/80 transition-colors"
+              >
+                <Plus size={14} />
+                New Podcast
+              </Link>
+            </div>
           </div>
 
           {myPodcasts === undefined ? (
@@ -168,7 +177,7 @@ function MyProfilePage() {
                           {p.listenerCount.toLocaleString()}
                         </span>
                         <span className="inline-block rounded-full bg-[#f97535]/10 px-2 py-0.5 text-[10px] font-semibold text-[#f97535]">
-                          {p.status}
+                          {p.status === 'script_review' ? 'review script' : p.status}
                         </span>
                       </div>
                       <MoreHorizontal

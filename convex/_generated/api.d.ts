@@ -8,11 +8,13 @@
  * @module
  */
 
+import type * as analytics from "../analytics.js";
 import type * as bookmarks from "../bookmarks.js";
 import type * as downloads from "../downloads.js";
 import type * as http from "../http.js";
 import type * as podcasts from "../podcasts.js";
 import type * as rateLimit from "../rateLimit.js";
+import type * as rss from "../rss.js";
 import type * as seed from "../seed.js";
 import type * as users from "../users.js";
 
@@ -23,11 +25,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  analytics: typeof analytics;
   bookmarks: typeof bookmarks;
   downloads: typeof downloads;
   http: typeof http;
   podcasts: typeof podcasts;
   rateLimit: typeof rateLimit;
+  rss: typeof rss;
   seed: typeof seed;
   users: typeof users;
 }>;

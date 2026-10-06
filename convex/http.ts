@@ -2,6 +2,7 @@ import { httpRouter } from 'convex/server'
 import { Webhook } from 'svix'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
+import { buildFeedXml } from './rss'
 
 const http = httpRouter()
 
@@ -113,6 +114,56 @@ http.route({
     }
 
     return new Response(null, { status: 200 })
+  }),
+})
+
+// ── RSS distribution ─────────────────────────────────────────────────────────
+
+// Public podcast feed for one creator: GET /rss/<userId>.xml
+http.route({
+  pathPrefix: '/rss/',
+  method: 'GET',
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url)
+    const authorId = decodeURIComponent(url.pathname.slice('/rss/'.length)).replace(/\.xml$/, '')
+    const data = await ctx.runQuery(internal.rss.feedData, { authorId })
+    if (!data) return new Response('Feed not found', { status: 404 })
+
+    const siteUrl = process.env.SITE_URL ?? url.origin
+    const xml = buildFeedXml(
+      {
+        title: `${data.name}'s Podcasts`,
+        description: `AI-generated podcast episodes by ${data.name}, made with Podcastr.`,
+        author: data.name,
+        email: data.email,
+        imageUrl: data.imageUrl ?? data.episodes[0]?.imageUrl,
+        link: siteUrl,
+        feedUrl: url.href,
+        episodes: data.episodes,
+      },
+      url.origin,
+    )
+    return new Response(xml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/rss+xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=300',
+      },
+    })
+  }),
+})
+
+// Episode audio as referenced by the feed's <enclosure>: counts the download,
+// then redirects to the stored file. GET /audio/<podcastId>.<ext>
+http.route({
+  pathPrefix: '/audio/',
+  method: 'GET',
+  handler: httpAction(async (ctx, req) => {
+    const name = decodeURIComponent(new URL(req.url).pathname.slice('/audio/'.length))
+    const podcastId = name.replace(/\.[a-z0-9]+$/i, '')
+    const target = await ctx.runMutation(internal.rss.recordDownload, { podcastId })
+    if (!target) return new Response('Episode not found', { status: 404 })
+    return new Response(null, { status: 302, headers: { Location: target } })
   }),
 })
 

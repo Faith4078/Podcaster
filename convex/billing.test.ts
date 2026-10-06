@@ -111,7 +111,7 @@ async function seedPodcast(
   t: ReturnType<typeof convexTest>,
   authorId: Id<'users'>,
   overrides: Partial<{
-    status: 'pending' | 'generating' | 'ready' | 'failed'
+    status: 'pending' | 'generating' | 'script_review' | 'ready' | 'failed'
     countedTowardQuota: boolean
   }> = {},
 ) {
@@ -264,10 +264,17 @@ describe('generationCount — idempotent counter at the ready step', () => {
     let author = await t.run((ctx) => ctx.db.get(authorId))
     expect(author?.generationCount ?? 0).toBe(0)
 
-    // Retry now succeeds — counts exactly once.
+    // Retry now succeeds. The failed step was the SCRIPT, so the retry stops at
+    // script review (nothing counted yet); approving it finishes the pipeline.
     process.env.GEMINI_API_KEY = 'test-key'
     stubFetch()
     await asUser.action(api.podcasts.retryGeneration, { podcastId })
+    await t.finishAllScheduledFunctions(vi.runAllTimers)
+    expect((await t.run((ctx) => ctx.db.get(podcastId)))?.status).toBe('script_review')
+    expect((await t.run((ctx) => ctx.db.get(authorId)))?.generationCount ?? 0).toBe(0)
+
+    const draft = (await t.run((ctx) => ctx.db.get(podcastId)))?.transcript ?? ''
+    await asUser.action(api.podcasts.approveScript, { podcastId, transcript: draft })
     await t.finishAllScheduledFunctions(vi.runAllTimers)
 
     author = await t.run((ctx) => ctx.db.get(authorId))

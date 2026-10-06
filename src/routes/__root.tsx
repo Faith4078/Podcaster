@@ -27,7 +27,12 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'Podcaster — AI Podcast App' },
+      { title: 'Podcaster — Make a podcast worth hearing' },
+      {
+        name: 'description',
+        content:
+          'Turn your ideas into a podcast with AI voices, then share your story and discover shows worth hearing.',
+      },
     ],
     links: [
       { rel: 'stylesheet', href: appCss },
@@ -38,11 +43,12 @@ export const Route = createRootRoute({
   component: AppShell,
 });
 
-const NO_SIDEBAR_ROUTES = ['/sign-in', '/sign-up'];
+const NO_SIDEBAR_ROUTES = ['/sign-in', '/sign-up', '/blog'];
 
 function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const withSidebar = !NO_SIDEBAR_ROUTES.some((p) => pathname.startsWith(p));
+  const withSidebar =
+    pathname !== '/' && !NO_SIDEBAR_ROUTES.some((p) => pathname.startsWith(p));
 
   if (!withSidebar) return <Outlet />;
 

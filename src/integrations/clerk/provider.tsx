@@ -10,6 +10,8 @@ export default function AppClerkProvider({ children }: { children: React.ReactNo
     <ClerkProvider
       publishableKey={PUBLISHABLE_KEY}
       afterSignOutUrl="/"
+      signInFallbackRedirectUrl="/dashboard"
+      signUpFallbackRedirectUrl="/dashboard"
       appearance={{
         variables: {
           colorBackground: '#15171C',

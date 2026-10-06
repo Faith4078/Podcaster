@@ -2,6 +2,7 @@ import { Show, UserButton, useUser } from '@clerk/tanstack-react-start';
 import { Link } from '@tanstack/react-router';
 import { useMutation } from 'convex/react';
 import {
+  BarChart3,
   Bookmark,
   Compass,
   CreditCard,
@@ -15,10 +16,11 @@ import { api } from '../../convex/_generated/api';
 import { useSidebar } from './SidebarContext';
 
 const navItems = [
-  { to: '/' as const, icon: Home, label: 'Home', exact: true },
+  { to: '/dashboard' as const, icon: Home, label: 'Dashboard' },
   { to: '/discover' as const, icon: Compass, label: 'Discover' },
   { to: '/bookmarks' as const, icon: Bookmark, label: 'Bookmarks' },
   { to: '/create-podcast' as const, icon: Mic, label: 'Create Podcast' },
+  { to: '/analytics' as const, icon: BarChart3, label: 'Analytics' },
   { to: '/my-profile' as const, icon: User, label: 'My Profile' },
   { to: '/billing' as const, icon: CreditCard, label: 'Billing' },
 ];
@@ -70,22 +72,30 @@ export default function PodcastrSidebar() {
             collapsed ? 'md:justify-center md:px-0' : ''
           }`}
         >
-          <svg
-            width="28"
-            height="28"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
+          <Link
+            to="/"
+            aria-label="Podcaster home"
+            title="Back to the homepage"
+            onClick={closeMobile}
+            className="flex items-center gap-3"
           >
-            <path d="M4 3.5L21 12L4 20.5V3.5Z" fill="#f97535" />
-          </svg>
-          <span
-            className={`text-xl font-bold tracking-tight text-white ${
-              collapsed ? 'md:hidden' : ''
-            }`}
-          >
-            Podcaster
-          </span>
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path d="M4 3.5L21 12L4 20.5V3.5Z" fill="#f97535" />
+            </svg>
+            <span
+              className={`text-xl font-bold tracking-tight text-white ${
+                collapsed ? 'md:hidden' : ''
+              }`}
+            >
+              Podcaster
+            </span>
+          </Link>
           <button
             type="button"
             onClick={closeMobile}
@@ -103,13 +113,12 @@ export default function PodcastrSidebar() {
             collapsed ? 'md:px-3' : ''
           }`}
         >
-          {navItems.map(({ to, icon: Icon, label, exact }) => (
+          {navItems.map(({ to, icon: Icon, label }) => (
             <Link
               key={to}
               to={to}
               onClick={closeMobile}
               title={label}
-              activeOptions={exact ? { exact: true } : undefined}
               className={`${linkBase} text-[#71788B] hover:bg-white/6 hover:text-white`}
               activeProps={{
                 className: `${linkBase} text-white bg-white/6 after:content-[''] after:absolute after:right-0 after:top-1/2 after:-translate-y-1/2 after:h-7 after:w-[3px] after:rounded-l-full after:bg-[#f97535]`,
